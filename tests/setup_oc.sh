@@ -37,6 +37,7 @@ echo "<?php define('DIR_STORAGE', '$OC/system/storage/');" > "$WORK/tools/prepen
 (cd "$OC/install" && php -d auto_prepend_file="$WORK/tools/prepend_storage.php" -d error_reporting=0 cli_install.php install \
 	--db_hostname localhost --db_username oc --db_password oc --db_database "$DB" --db_driver mysqli --db_port 3306 \
 	--username admin --password admin --email admin@example.com --http_server "http://127.0.0.1:$P0/")
+# a 2-letter + region language code works for Handover::strings(); demo has en-gb only
 sed -i "s/\$_\['error_display'\]\s*= true;/\$_['error_display'] = false;/" "$OC/system/config/default.php"
 mysql -uroot "$DB" -e "UPDATE oc_setting SET value='0' WHERE \`key\`='config_error_display';"
 
@@ -49,18 +50,19 @@ cat > "$WORK/tools/prepend_test.php" <<EOF
 define('AICHAT_API_BASE', 'http://127.0.0.1:$PAPI');
 define('AICHAT_TURNSTILE_URL', 'http://127.0.0.1:$PSVC/siteverify');
 define('AICHAT_SPEEDY_BASE', 'http://127.0.0.1:$PSVC/v1');
+define('AICHAT_TELEGRAM_BASE', 'http://127.0.0.1:$PSVC/tg');
 define('AICHAT_MAIL_FILE', '$WORK/mail.log');
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
 EOF
 pkill -f "php -d auto_prepend_file=$WORK/tools/prepend_test.php" || true
 pkill -f "127.0.0.1:$PAPI" || true
 pkill -f "127.0.0.1:$PSVC" || true
-rm -f "$WORK/mail.log"
+rm -f "$WORK/mail.log" "$WORK/fake_tg.json"
 sleep 0.5
 (php -d auto_prepend_file="$WORK/tools/prepend_test.php" -S 127.0.0.1:$P0 -t "$OC" >"$WORK/srv$P0.log" 2>&1 &)
 (php -d auto_prepend_file="$WORK/tools/prepend_test.php" -S 127.0.0.1:$P1 -t "$OC" >"$WORK/srv$P1.log" 2>&1 &)
 (FAKE_LOG="$WORK/fake.log" FAKE_OWN="http://127.0.0.1:$P0/" php -S 127.0.0.1:$PAPI "$REPO/tests/fake_anthropic.php" >"$WORK/fake_srv.log" 2>&1 &)
-(FAKE_SVC_LOG="$WORK/fake_services.log" php -S 127.0.0.1:$PSVC "$REPO/tests/fake_services.php" >"$WORK/fake_svc_srv.log" 2>&1 &)
+(FAKE_SVC_LOG="$WORK/fake_services.log" FAKE_TG_STATE="$WORK/fake_tg.json" php -S 127.0.0.1:$PSVC "$REPO/tests/fake_services.php" >"$WORK/fake_svc_srv.log" 2>&1 &)
 sleep 1
 
 # 5. Second store, products split between stores, a store-1 SEO keyword
@@ -101,5 +103,6 @@ case "$PAGE" in *'value="Bot1"'*'value="18:00"'*) echo "admin settings round-tri
 # 7. Smoke test
 RC=0
 php "$REPO/tests/installer_test.php" "$OC" localhost oc oc "$DB" oc_ || RC=1
-SMOKE_DB=localhost:oc:oc:$DB:oc_ SMOKE_OC="$OC" SMOKE_MAIL="$WORK/mail.log" php "$REPO/tests/smoke_http.php" "http://127.0.0.1:$P0/" "http://127.0.0.1:$P1/" || RC=1
+php "$REPO/tests/upgrade3_test.php" "$OC" localhost oc oc "$DB" oc_ || RC=1
+SMOKE_DB=localhost:oc:oc:$DB:oc_ SMOKE_OC="$OC" SMOKE_MAIL="$WORK/mail.log" SMOKE_TG="http://127.0.0.1:$PSVC/tg" php "$REPO/tests/smoke_http.php" "http://127.0.0.1:$P0/" "http://127.0.0.1:$P1/" || RC=1
 exit $RC

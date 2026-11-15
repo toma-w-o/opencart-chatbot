@@ -18,6 +18,7 @@ class ModelExtensionModuleAichat extends Model {
 			`ip` = '" . $this->db->escape(substr((string)$data['ip'], 0, 45)) . "',
 			`user_agent` = '" . $this->db->escape($this->cut($data['user_agent'], 255)) . "',
 			`mode` = 'bot',
+			`is_test` = '" . (!empty($data['is_test']) ? 1 : 0) . "',
 			`first_url` = '" . $this->db->escape($this->cut($data['url'], 1000)) . "',
 			`last_url` = '" . $this->db->escape($this->cut($data['url'], 1000)) . "',
 			`note` = '',
@@ -77,7 +78,7 @@ class ModelExtensionModuleAichat extends Model {
 			$in[] = "'" . $this->db->escape($role) . "'";
 		}
 
-		$query = $this->db->query("SELECT `message_id`, `role`, `content`, `meta`, `date_added` FROM `" . DB_PREFIX . "aichat_message` WHERE `conversation_id` = '" . (int)$conversationId . "' AND `role` IN (" . implode(',', $in) . ") ORDER BY `message_id` DESC LIMIT " . (int)$limit);
+		$query = $this->db->query("SELECT `message_id`, `role`, `content`, `meta`, `rating`, `date_added` FROM `" . DB_PREFIX . "aichat_message` WHERE `conversation_id` = '" . (int)$conversationId . "' AND `role` IN (" . implode(',', $in) . ") ORDER BY `message_id` DESC LIMIT " . (int)$limit);
 
 		$rows = array_reverse($query->rows);
 
@@ -86,6 +87,45 @@ class ModelExtensionModuleAichat extends Model {
 		}
 
 		return $rows;
+	}
+
+	/** Widget poll: staff / assistant / system messages after $afterId. */
+	public function getMessagesAfter($conversationId, $afterId, $limit = 50) {
+		$query = $this->db->query("SELECT `message_id`, `role`, `content`, `meta` FROM `" . DB_PREFIX . "aichat_message` WHERE `conversation_id` = '" . (int)$conversationId . "' AND `message_id` > '" . (int)$afterId . "' AND `role` IN ('staff', 'assistant', 'system') ORDER BY `message_id` ASC LIMIT " . (int)$limit);
+		$rows = $query->rows;
+
+		foreach ($rows as $i => $row) {
+			$rows[$i]['meta'] = $row['meta'] ? json_decode($row['meta'], true) : array();
+		}
+
+		return $rows;
+	}
+
+	/** Rating of an assistant message of this conversation; false when it is not one. */
+	public function rateMessage($conversationId, $messageId, $value) {
+		$row = $this->db->query("SELECT `message_id` FROM `" . DB_PREFIX . "aichat_message` WHERE `message_id` = '" . (int)$messageId . "' AND `conversation_id` = '" . (int)$conversationId . "' AND `role` = 'assistant'")->row;
+
+		if (!$row) {
+			return false;
+		}
+
+		$this->db->query("UPDATE `" . DB_PREFIX . "aichat_message` SET `rating` = '" . (int)$value . "' WHERE `message_id` = '" . (int)$messageId . "'");
+
+		return true;
+	}
+
+	public function getPreview($previewId) {
+		$query = $this->db->query("SELECT * FROM `" . DB_PREFIX . "aichat_preview` WHERE `preview_id` = '" . (int)$previewId . "' AND `date_added` > NOW() - INTERVAL 1 DAY");
+
+		if (!$query->num_rows) {
+			return null;
+		}
+
+		$row = $query->row;
+		$row['data'] = $row['data'] ? json_decode($row['data'], true) : array();
+		$row['data'] = is_array($row['data']) ? $row['data'] : array();
+
+		return $row;
 	}
 
 	private function cut($text, $max) {

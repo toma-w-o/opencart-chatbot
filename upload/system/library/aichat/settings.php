@@ -18,6 +18,7 @@ namespace Aichat;
 class Settings {
 	const CODE = 'module_aichat';
 	const DEFAULT_MODEL = 'claude-sonnet-5-5';
+	const DEFAULT_LIGHT_MODEL = 'claude-haiku-5-5';
 
 	private $db;
 	private $rows = null;
@@ -42,15 +43,28 @@ class Settings {
 			'g_warn_email'           => '',
 			'g_trust_cf_ip'          => 0,
 			'g_couriers'             => self::defaultCouriers(),
+			// round 3
+			'g_model_light'          => self::DEFAULT_LIGHT_MODEL,
+			'g_price_light_in'       => 0.1,  // USD per million tokens of g_model_light
+			'g_price_light_out'      => 0.5,
+			'g_tg_chat_id'           => '',   // Telegram forum group id, e.g. -1001234567890
+			'g_tg_translate'         => 0,
+			'g_tg_staff_lang'        => 'bg', // language the staff reads (code or name)
+			'g_tg_canned'            => array(), // list of {code, text}; staff types /code in the topic
+			'g_report_weekly'        => 0,
+			'g_report_email'         => '',
 			// internal (written by the module, not by the admin form)
 			'g_schema'               => 0,
 			'g_warn_sent'            => array(),
+			'g_tg_secret'            => '',   // webhook path secret + secret-token header (generated)
+			'g_report_week'          => '',   // ISO week the last weekly report was handled for
+			'g_cleanup_day'          => '',   // day the last retention cleanup ran
 		);
 	}
 
 	/** Global keys the module maintains itself; saveGlobal() ignores them. */
 	public static function internalKeys() {
-		return array('g_secret', 'g_schema', 'g_warn_sent');
+		return array('g_secret', 'g_schema', 'g_warn_sent', 'g_tg_secret', 'g_report_week', 'g_cleanup_day');
 	}
 
 	/** Courier list seeded at install: {code, name, type: speedy|link, hosts[], track_url with {number}}. */
@@ -112,6 +126,17 @@ class Settings {
 			's_quick_replies'         => array(),
 			's_resume_days'           => 7,
 			's_courier'               => '',
+			// round 3
+			's_couriers'              => array(), // courier codes enabled for this store (empty = all)
+			's_handover_timeout'      => 60,      // seconds until an untaken handover returns to the bot
+			's_tg_chat_id'            => '',      // Telegram group override for this store
+			's_proactive'             => 0,
+			's_proactive_delay'       => 20,
+			's_proactive_text'        => array(), // by language_id
+			's_sound'                 => 1,
+			's_feat_images'           => 1,
+			's_feat_rating'           => 1,
+			's_feat_cart'             => 1,
 		);
 	}
 
@@ -123,7 +148,7 @@ class Settings {
 
 		if ($key === null) {
 			$all = array_merge(self::globalDefaults(), $values);
-			unset($all['g_secret'], $all['g_warn_sent']);
+			unset($all['g_secret'], $all['g_warn_sent'], $all['g_report_week'], $all['g_cleanup_day']);
 			return $this->cast($all);
 		}
 
@@ -218,6 +243,49 @@ class Settings {
 
 	public function ensureSecret() {
 		return $this->getSecret();
+	}
+
+	/** Webhook secret for Telegram (path parameter and secret-token header); generated on first use. */
+	public function telegramSecret() {
+		$secret = (string)$this->getGlobal('g_tg_secret', '');
+
+		if (!preg_match('/^[A-Za-z0-9_-]{32,}$/', $secret)) {
+			$secret = bin2hex(random_bytes(24));
+			$this->write(0, 'g_tg_secret', $secret);
+			$this->rows = null;
+		}
+
+		return $secret;
+	}
+
+	/** New Telegram webhook secret (admin "regenerate"); the webhook must be set again afterwards. */
+	public function regenerateTelegramSecret() {
+		$this->write(0, 'g_tg_secret', bin2hex(random_bytes(24)));
+		$this->rows = null;
+
+		return $this->telegramSecret();
+	}
+
+	/** Courier codes enabled for a store, default first (s_couriers empty = every configured courier). */
+	public function storeCouriers($storeId) {
+		$all = $this->couriers();
+		$enabled = $this->getStore($storeId, 's_couriers');
+		$enabled = is_array($enabled) ? array_values(array_filter(array_map('strval', $enabled))) : array();
+		$out = array();
+
+		foreach ($all as $code => $c) {
+			if (!$enabled || in_array($code, $enabled, true)) {
+				$out[$code] = $c;
+			}
+		}
+
+		$default = (string)$this->getStore($storeId, 's_courier');
+
+		if ($default !== '' && isset($out[$default])) {
+			$out = array($default => $out[$default]) + $out;
+		}
+
+		return $out;
 	}
 
 	/** Writes one module-maintained global key (g_schema, g_warn_sent). */
@@ -332,6 +400,61 @@ class Settings {
 		$data = include $file;
 
 		return is_array($data) ? $data : array();
+	}
+
+	// ---- other secrets (Telegram bot token ...): one file each, write-only like the API key
+
+	public static function secretFile($name) {
+		$name = strtolower(preg_replace('/[^a-z0-9_]/i', '', (string)$name));
+
+		return rtrim(DIR_STORAGE, '/') . '/aichat/secret_' . $name . '.php';
+	}
+
+	/** setSecret('tg_token', '123:abc'); an empty value deletes it. */
+	public function setSecret($name, $value) {
+		if (preg_replace('/[^a-z0-9_]/i', '', (string)$name) === '') {
+			return false;
+		}
+
+		$this->protectDir();
+		$file = self::secretFile($name);
+		$value = trim((string)$value);
+
+		if ($value === '') {
+			if (is_file($file)) {
+				@unlink($file);
+			}
+			return true;
+		}
+
+		$php = "<?php\n// AI Chat secret. Do not share.\nreturn " . var_export($value, true) . ";\n";
+		$ok = @file_put_contents($file, $php, LOCK_EX) !== false;
+
+		if ($ok) {
+			@chmod($file, 0600);
+			if (function_exists('opcache_invalidate')) {
+				@opcache_invalidate($file, true);
+			}
+		}
+
+		return $ok;
+	}
+
+	public function hasSecret($name) {
+		return $this->getNamedSecret($name) !== '';
+	}
+
+	/** Server-side only. Never send this to a view or the browser. */
+	public function getNamedSecret($name) {
+		$file = self::secretFile($name);
+
+		if (!is_file($file)) {
+			return '';
+		}
+
+		$value = include $file;
+
+		return is_string($value) ? trim($value) : '';
 	}
 
 	// ---- API key (file, never in the database, never echoed) ----

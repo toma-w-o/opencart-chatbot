@@ -16,11 +16,14 @@ namespace Aichat;
 class Prompt {
 	const TREE_MAX_LINES = 400;
 	const TREE_MAX_DEPTH = 3;
+	const KB_IN_PROMPT = 40;
 
 	private $registry;
 	private $config;
 	private $settings;
 	private $tools;
+	/** draft instructions of an admin test chat: {g_instructions?, s_instructions?} */
+	private $draft = array();
 
 	public function __construct($registry, Settings $settings, Tools $tools) {
 		$this->registry = $registry;
@@ -42,6 +45,17 @@ class Prompt {
 			array('type' => 'text', 'text' => $this->stable($store, $botName, $languageName), 'cache_control' => array('type' => 'ephemeral')),
 			array('type' => 'text', 'text' => $this->dynamic($store, $page, $customerName, $verifiedOrderId, $loggedIn)),
 		);
+	}
+
+	/** Admin test chat: draft instructions replace the saved ones for this conversation only. */
+	public function setDraft(array $draft) {
+		$this->draft = array();
+
+		foreach (array('g_instructions', 's_instructions') as $key) {
+			if (isset($draft[$key]) && is_string($draft[$key])) {
+				$this->draft[$key] = $draft[$key];
+			}
+		}
 	}
 
 	/** "- Title [id]" per enabled information page of the store. */
@@ -100,17 +114,36 @@ You are the first line of help, and you can answer most questions yourself. Befo
 - Logged-in customers: the store already knows who they are. Use my_orders / my_order (and my_wishlist); never ask them for their name, e-mail or phone to identify them.
 - Tell only what the tools return: status, products, totals, delivery address, history comments and tracking numbers. For the live position of a shipment use track_shipment. The customer sees order and tracking cards with the links, so do not write links.
 - Mention the delivery address only when the customer asks about it or it matters for the answer.
-- You cannot change, cancel or refund orders: for that give the contacts.";
+- You cannot change, cancel or refund orders: for that give the contacts.
+- Returns / complaints about a product of a verified or own order: collect conversationally which product, the reason and details (photos help: the customer can attach them), then call return_request. Never ask for or reveal anything about orders that were not verified in this chat.";
+
+		$s[] = "# Out of stock, comparisons, notify-me
+- When a product the customer wants is out of stock, say so and offer the closest in-stock alternatives yourself: search_products with similar_to (the product_id) and in_stock_only true, then show 2-3 with show_products. Also offer to notify them when it is back (stock_alert with their e-mail).
+- Comparing 2-3 products: call get_product with product_ids, then write a short comparison in sentences (main differences that matter for the customer: size, material, features, price, availability), based only on the descriptions, attributes and options. No tables. End with which one fits which need.";
+
+		$s[] = "# Images from the customer
+- The customer can attach photos. When a photo shows a product, identify it by searching the catalog (search_products with what you see: type, brand, colour, text on the label) and show the matching products. If you are not sure which product it is, say so and ask for the product code / model or a photo of the label instead of guessing.
+- Photos of damaged or wrong items belong to a return request (return_request with the image ids). Never describe people in photos.";
+
+		$s[] = "# A person from the team
+- When the customer asks for a person, or you really cannot help (complaint, special case), call request_human with a short reason. If it returns waiting, say a colleague will join shortly. If it returns that nobody is available, apologise, ask for an e-mail or phone and call leave_contact.
+- Messages marked [Store staff] are from your colleagues who answered in this chat; continue naturally from what they said.
+- When a colleague could not be reached and the customer gives an e-mail or phone, call leave_contact (with a short note of what it is about) and confirm that the team will get back to them.";
 		$s[] = "# Emoji\n" . $this->emojiRule((int)$store['s_emoji']);
 
-		$owner = $this->decode($this->settings->getGlobal('g_instructions'));
+		$owner = $this->decode(isset($this->draft['g_instructions']) ? $this->draft['g_instructions'] : $this->settings->getGlobal('g_instructions'));
 		if ($owner !== '') {
 			$s[] = "# Instructions from the store owner (all stores)\n" . $owner;
 		}
 
-		$storeInstructions = $this->decode($store['s_instructions']);
+		$storeInstructions = $this->decode(isset($this->draft['s_instructions']) ? $this->draft['s_instructions'] : $store['s_instructions']);
 		if ($storeInstructions !== '') {
 			$s[] = "# Instructions from the store owner (this store)\n" . $storeInstructions;
+		}
+
+		$kb = $this->knowledgeBase();
+		if ($kb !== '') {
+			$s[] = "# Approved answers of this store (authoritative: use them as written, in the customer's language; more with search_kb)\n" . $kb;
 		}
 
 		$s[] = "# Store contacts\n" . $this->contacts($store);
@@ -207,8 +240,23 @@ You are the first line of help, and you can answer most questions yourself. Befo
 		return $any ? implode("\n", $out) : "Not specified.";
 	}
 
+	/** Newest active knowledge-base pairs of the store + language (aichat_kb). */
+	public function knowledgeBase() {
+		$lines = array();
+
+		foreach ($this->tools->kbRows(self::KB_IN_PROMPT) as $row) {
+			$lines[] = "Q: " . $this->oneLine($this->decode($row['question']), 300) . "\nA: " . trim($this->decode($row['answer']));
+		}
+
+		return implode("\n\n", $lines);
+	}
+
 	/** Staff working now (store timezone = PHP default timezone set by OpenCart). */
 	public function isOpen(array $store, $now) {
+		return self::openAt($store, $now);
+	}
+
+	public static function openAt(array $store, $now) {
 		$hours = is_array($store['s_work_hours']) ? $store['s_work_hours'] : array();
 		$key = strtolower(date('D', $now));
 

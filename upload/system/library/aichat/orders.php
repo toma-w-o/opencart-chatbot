@@ -119,6 +119,28 @@ class Orders {
 		return $customerId && (int)$order['customer_id'] === $customerId;
 	}
 
+	/**
+	 * The order row when the visitor may see it (verified in this conversation
+	 * or their own, this store), else null - for return requests. Callers give
+	 * one generic answer for "not found" and "not yours".
+	 */
+	public function visibleOrder($orderNumber) {
+		$order = $this->orderRow(self::orderNumber($orderNumber));
+
+		return ($order && $this->maySee($order)) ? $order : null;
+	}
+
+	/** Products of a visible order: list of {order_product_id, product_id, name, model, quantity}. */
+	public function orderProducts(array $order) {
+		$out = array();
+
+		foreach ($this->db->query("SELECT `order_product_id`, `product_id`, `name`, `model`, `quantity` FROM `" . DB_PREFIX . "order_product` WHERE `order_id` = '" . (int)$order['order_id'] . "' ORDER BY `order_product_id` LIMIT 50")->rows as $p) {
+			$out[] = array('order_product_id' => (int)$p['order_product_id'], 'product_id' => (int)$p['product_id'], 'name' => $this->text($p['name']), 'model' => $this->text($p['model']), 'quantity' => (int)$p['quantity']);
+		}
+
+		return $out;
+	}
+
 	private function orderRow($orderId) {
 		$query = $this->db->query("SELECT * FROM `" . DB_PREFIX . "order` WHERE `order_id` = '" . (int)$orderId . "' AND `store_id` = '" . (int)$this->storeId . "' AND `order_status_id` > '0'");
 
@@ -446,7 +468,8 @@ class Orders {
 	 */
 	public function tracking(array $order) {
 		$found = array();
-		$couriers = $this->settings->couriers();
+		// only the couriers enabled for this store (s_couriers, empty = all), default first
+		$couriers = $this->settings->storeCouriers($this->storeId);
 		$default = (string)$this->settings->getStore($this->storeId, 's_courier');
 
 		$column = $this->trackingColumn();
@@ -698,6 +721,9 @@ class Orders {
 			'title'    => sprintf($this->lang('card_order', 'Order #%s'), (int)$order['order_id']),
 			'subtitle' => implode(' · ', array_filter(array($details['status'], $details['total'], $details['date']))),
 			'href'     => $href,
+			'number'   => (string)(int)$order['order_id'],
+			'status'   => $details['status'],
+			'total'    => $details['total'],
 		);
 
 		if ($viewLink !== '') {
@@ -717,12 +743,20 @@ class Orders {
 			}
 		}
 
-		return array(
+		$card = array(
 			'type'     => 'tracking',
 			'title'    => trim(($t['courier_name'] !== '' ? $t['courier_name'] . ' ' : '') . $t['number']),
 			'subtitle' => $subtitle !== '' ? $subtitle : $this->lang('card_track', 'Track shipment'),
 			'href'     => $t['url'],
+			'courier'  => $t['courier_name'],
+			'number'   => $t['number'],
 		);
+
+		if ($subtitle !== '') {
+			$card['status'] = $subtitle;
+		}
+
+		return $card;
 	}
 
 	// ================================================================ text

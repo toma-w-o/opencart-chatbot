@@ -20,6 +20,7 @@ class ControllerExtensionModuleAichat extends Controller {
 
 	public function boot() {
 		$settings = $this->settings();
+		$this->ensureSchema($settings);
 		$storeId = (int)$this->config->get('config_store_id');
 		$languageId = (int)$this->config->get('config_language_id');
 		$store = $settings->getStore($storeId);
@@ -56,12 +57,27 @@ class ControllerExtensionModuleAichat extends Controller {
 
 		$botName = $this->botName($store);
 		$history = array();
+		$token = $guard->makeToken($publicId, $storeId);
+
+		if ($conversation && (new \Aichat\Handover($this->registry, $settings))->checkTimeout($conversation)) {
+			$conversation = $this->model_extension_module_aichat->getConversation($publicId, $storeId);
+		}
 
 		if ($conversation) {
 			$tools = new \Aichat\Tools($this->registry, $storeId, $languageId);
+			$tools->setContext($settings, $conversation, '');
 
-			foreach ($this->model_extension_module_aichat->getMessages($conversation['conversation_id'], self::HISTORY_FOR_WIDGET) as $message) {
-				$item = array('role' => $message['role'] === 'user' ? 'user' : ($message['role'] === 'staff' ? 'staff' : 'assistant'), 'content' => $message['content']);
+			foreach ($this->model_extension_module_aichat->getMessages($conversation['conversation_id'], self::HISTORY_FOR_WIDGET, array('user', 'assistant', 'staff', 'system')) as $message) {
+				$item = array('role' => in_array($message['role'], array('user', 'staff', 'system'), true) ? $message['role'] : 'assistant', 'content' => $message['content'], 'message_id' => (int)$message['message_id']);
+				if ($message['role'] === 'staff' && !empty($message['meta']['staff_name'])) {
+					$item['staff_name'] = (string)$message['meta']['staff_name'];
+				}
+				if ($item['role'] === 'assistant') {
+					$item['rating'] = (int)$message['rating'];
+				}
+				if (!empty($message['meta']['images']) && is_array($message['meta']['images'])) {
+					$item['images'] = $this->imageItems($message['meta']['images'], $token);
+				}
 				$groups = $this->cardGroups($tools, $message['meta']);
 				if ($groups) {
 					$item['products'] = $this->flatten($groups);
@@ -70,12 +86,21 @@ class ControllerExtensionModuleAichat extends Controller {
 				if (!empty($message['meta']['cards']) && is_array($message['meta']['cards'])) {
 					$item['cards'] = array_values($message['meta']['cards']);
 				}
-				if ($item['content'] === '' && empty($item['products']) && empty($item['cards'])) {
+				if ($item['content'] === '' && empty($item['products']) && empty($item['cards']) && empty($item['images'])) {
 					continue;
 				}
 				$history[] = $item;
 			}
 		}
+
+		$pageType = 'other';
+		$url = isset($this->request->get['url']) ? (string)$this->request->get['url'] : '';
+		if ((int)$store['s_proactive'] && !$history && $url !== '') {
+			$pageContext = new \Aichat\PageContext($this->registry);
+			$page = $pageContext->resolve(substr($url, 0, 2000));
+			$pageType = $page['type'];
+		}
+		$proactiveText = $this->byLanguage($store['s_proactive_text'], $languageId);
 
 		$greeting = $this->byLanguage($store['s_greeting'], $languageId);
 		if ($greeting === '') {
@@ -96,7 +121,7 @@ class ControllerExtensionModuleAichat extends Controller {
 			'greeting'       => $greeting,
 			'emoji'          => (int)$store['s_emoji'],
 			'strings'        => $this->strings($botName),
-			'token'          => $guard->makeToken($publicId, $storeId),
+			'token'          => $token,
 			'history'        => $history,
 			'mode'           => $conversation ? ($conversation['mode'] === 'closed' ? 'bot' : $conversation['mode']) : 'bot',
 			'turnstile_site' => $turnstile !== '' ? $turnstile : null,
@@ -106,7 +131,69 @@ class ControllerExtensionModuleAichat extends Controller {
 			'quick_replies'  => $this->quickReplies($store, $languageId),
 			'logged_in'      => (bool)$this->customer->isLogged(),
 			'appearance'     => $this->appearance($store, $languageId, $botName),
+			'features'       => array(
+				'images' => (int)$store['s_feat_images'] === 1 && function_exists('imagecreatetruecolor'),
+				'rating' => (int)$store['s_feat_rating'] === 1,
+				'cart'   => (int)$store['s_feat_cart'] === 1,
+			),
+			'sound'          => (int)$store['s_sound'] === 1,
+			'proactive'      => array(
+				// decided here: only on product / category / search / brand pages, only for new visitors
+				'enabled' => (int)$store['s_proactive'] === 1 && in_array($pageType, array('product', 'category', 'search', 'manufacturer'), true),
+				'delay'   => max(3, min(600, (int)$store['s_proactive_delay'])),
+				'text'    => $proactiveText !== '' ? $proactiveText : $this->language->get('widget_proactive'),
+			),
 		));
+
+		$this->maintenance($settings);
+	}
+
+	/** Lazy housekeeping after the response (weekly report, retention), see \Aichat\Maintenance. */
+	private function maintenance(\Aichat\Settings $settings) {
+		$maintenance = new \Aichat\Maintenance($this->registry, $settings);
+
+		if (!$maintenance->due()) {
+			return;
+		}
+
+		$response = $this->response;
+		register_shutdown_function(function () use ($maintenance, $response) {
+			if (function_exists('fastcgi_finish_request')) {
+				@fastcgi_finish_request();
+			}
+			$maintenance->run();
+		});
+	}
+
+	/** New columns / tables on the storefront before the admin was opened after an update. */
+	private function ensureSchema(\Aichat\Settings $settings) {
+		if ((int)$settings->getGlobal('g_schema') < \Aichat\Installer::SCHEMA && (int)$settings->getGlobal('g_schema') > 0) {
+			\Aichat\Installer::upgrade($this->registry);
+			$this->settingsObj = null;
+		}
+	}
+
+	/** history / poll images: [{id, thumb}] (thumb served by the image route to this token only). */
+	private function imageItems(array $ids, $token) {
+		$out = array();
+
+		foreach ($ids as $id) {
+			$out[] = array('id' => (int)$id, 'thumb' => $this->imageUrl($token, (int)$id, true));
+		}
+
+		return $out;
+	}
+
+	private function imageUrl($token, $id, $thumb) {
+		return $this->endpoint() . 'image&token=' . rawurlencode($token) . '&id=' . (int)$id . ($thumb ? '&thumb=1' : '');
+	}
+
+	/** Absolute base of our routes: <store url>index.php?route=extension/module/aichat/ */
+	private function endpoint() {
+		$secure = !empty($this->request->server['HTTPS']) && $this->request->server['HTTPS'] !== 'off';
+		$base = $secure && $this->config->get('config_ssl') ? $this->config->get('config_ssl') : $this->config->get('config_url');
+
+		return rtrim((string)$base, '/') . '/index.php?route=extension/module/aichat/';
 	}
 
 	/** Conversation still inside the resume window (s_resume_days, 0 = always resume). */
@@ -230,14 +317,29 @@ class ControllerExtensionModuleAichat extends Controller {
 		$model = $this->model_extension_module_aichat;
 		$guard = new \Aichat\Guard($this->registry, $settings);
 
-		// --- token -> conversation (bound to this store)
-		$publicId = $guard->parseToken(isset($input['token']) ? $input['token'] : '', $storeId);
+		// --- token -> conversation (bound to this store); admin test chat: preview token
+		$preview = null;
+
+		if (isset($input['preview']) && $input['preview'] !== '' && $input['preview'] !== null) {
+			$previewId = $guard->parsePreviewToken($input['preview']);
+			$preview = $previewId ? $model->getPreview($previewId) : null;
+
+			if (!$preview || (int)$preview['store_id'] !== $storeId) {
+				$this->fail('invalid_token');
+				return;
+			}
+
+			$publicId = $guard->previewPublicId($previewId);
+		} else {
+			$publicId = $guard->parseToken(isset($input['token']) ? $input['token'] : '', $storeId);
+		}
 
 		if (!$publicId) {
 			$this->fail('invalid_token');
 			return;
 		}
 
+		$isTest = $preview !== null;
 		$conversation = $model->getConversation($publicId, $storeId);
 
 		if ($conversation && (int)$conversation['customer_id'] && (int)$conversation['customer_id'] !== $customerId) {
@@ -245,11 +347,35 @@ class ControllerExtensionModuleAichat extends Controller {
 			return;
 		}
 
-		// --- message
+		if ($conversation && !$isTest && (int)$conversation['is_test']) {
+			$this->fail('invalid_token');
+			return;
+		}
+
+		// --- message (+ images)
 		$message = isset($input['message']) && is_string($input['message']) ? $this->cleanText($input['message']) : '';
 		$url = isset($input['url']) && is_string($input['url']) ? substr($input['url'], 0, 2000) : '';
+		$imageIds = isset($input['images']) && is_array($input['images']) ? array_slice(array_values(array_filter(array_map('intval', array_filter($input['images'], 'is_numeric')))), 0, 10) : array();
 
-		if ($message === '') {
+		// the widget sends an image-only message with the text "Photo" (or its localised string): no caption
+		if ($imageIds && in_array($message, array('Photo', $this->language->get('widget_photo')), true)) {
+			$message = '';
+		}
+
+		if ($isTest && $url === '') {
+			$url = (string)$preview['url'];
+		}
+
+		if ($imageIds && !(int)$store['s_feat_images']) {
+			$imageIds = array();
+		}
+
+		if (count($imageIds) > \Aichat\Uploads::MAX_PER_MESSAGE) {
+			$this->fail('image_limit', \Aichat\Uploads::MAX_PER_MESSAGE);
+			return;
+		}
+
+		if ($message === '' && !$imageIds) {
 			$this->fail('empty');
 			return;
 		}
@@ -259,44 +385,65 @@ class ControllerExtensionModuleAichat extends Controller {
 			return;
 		}
 
-		// --- stage 2: Cloudflare Turnstile, once per conversation (challenge, never a hard block)
 		$ip = $guard->clientIp($this->request->server);
-		$verifiedState = $conversation ? (int)$conversation['human_verified'] : 0;
 		$newVerified = 0;
-		$turnstileToken = isset($input['turnstile']) && is_string($input['turnstile']) ? trim($input['turnstile']) : '';
 
-		if ($guard->turnstileEnabled() && $verifiedState === 0) {
-			if ($turnstileToken === '') {
-				$this->fail('challenge');
+		if ($isTest) {
+			// admin test chat (HMAC preview token): no Turnstile, no visitor limits, a generous flood guard
+			if (!$guard->hit('m:p:' . $publicId, 60, 30)) {
+				$this->fail('rate_limited');
 				return;
 			}
+		} else {
+			// --- stage 2: Cloudflare Turnstile, once per conversation (challenge, never a hard block)
+			$verifiedState = $conversation ? (int)$conversation['human_verified'] : 0;
+			$turnstileToken = isset($input['turnstile']) && is_string($input['turnstile']) ? trim($input['turnstile']) : '';
 
-			if ($turnstileToken === 'unavailable') {
-				// the visitor's browser could not run Turnstile: rate limits only, a tighter per-IP budget
-				if (!$guard->hitUnavailable($ip)) {
-					$this->fail('rate_limited');
-					return;
-				}
-			} else {
-				$check = $guard->verifyTurnstile($turnstileToken, $ip);
-
-				if ($check === 'fail') {
+			if ($guard->turnstileEnabled() && $verifiedState === 0) {
+				if ($turnstileToken === '') {
 					$this->fail('challenge');
 					return;
 				}
 
-				// 'outage': remembered as 2 = not challenged again, but no per-IP exemption
-				$newVerified = $check === 'ok' ? 1 : 2;
-				$verifiedState = $newVerified;
+				if ($turnstileToken === 'unavailable') {
+					// the visitor's browser could not run Turnstile: rate limits only, a tighter per-IP budget
+					if (!$guard->hitUnavailable($ip)) {
+						$this->fail('rate_limited');
+						return;
+					}
+				} else {
+					$check = $guard->verifyTurnstile($turnstileToken, $ip);
+
+					if ($check === 'fail') {
+						$this->fail('challenge');
+						return;
+					}
+
+					// 'outage': remembered as 2 = not challenged again, but no per-IP exemption
+					$newVerified = $check === 'ok' ? 1 : 2;
+					$verifiedState = $newVerified;
+				}
+			}
+
+			// --- rate limits (per conversation, per IP, per chat, daily chat cap)
+			$limit = $guard->checkMessage($store, $conversation, $publicId, $ip, $verifiedState === 1, $storeId);
+
+			if ($limit !== '') {
+				$this->fail($limit, $this->contactsLine($store));
+				return;
 			}
 		}
 
-		// --- rate limits (per conversation, per IP, per chat, daily chat cap)
-		$limit = $guard->checkMessage($store, $conversation, $publicId, $ip, $verifiedState === 1, $storeId);
+		// images must have been uploaded to this very conversation
+		$uploads = new \Aichat\Uploads($this->registry);
 
-		if ($limit !== '') {
-			$this->fail($limit, $this->contactsLine($store));
-			return;
+		if ($imageIds) {
+			$owned = $conversation ? $uploads->filterOwned($imageIds, (int)$conversation['conversation_id']) : array();
+			if (count($owned) !== count(array_unique($imageIds))) {
+				$this->fail('image_not_found');
+				return;
+			}
+			$imageIds = $owned;
 		}
 
 		if ($this->streaming) {
@@ -304,19 +451,8 @@ class ControllerExtensionModuleAichat extends Controller {
 		}
 
 		// --- persist
-		$isNew = !$conversation;
-
-		if ($isNew) {
-			$conversationId = $model->addConversation(array(
-				'store_id'    => $storeId,
-				'language_id' => $languageId,
-				'customer_id' => $customerId,
-				'public_id'   => $publicId,
-				'ip'          => $ip,
-				'user_agent'  => isset($this->request->server['HTTP_USER_AGENT']) ? $this->request->server['HTTP_USER_AGENT'] : '',
-				'url'         => $url,
-			));
-			$guard->countChat($storeId);
+		if (!$conversation) {
+			$conversationId = $this->createConversation($model, $guard, $storeId, $languageId, $customerId, $publicId, $ip, $url, $isTest);
 		} else {
 			$conversationId = (int)$conversation['conversation_id'];
 		}
@@ -326,6 +462,11 @@ class ControllerExtensionModuleAichat extends Controller {
 		}
 
 		$conversation = $model->getConversation($publicId, $storeId);
+		$handover = new \Aichat\Handover($this->registry, $settings);
+
+		if ($handover->checkTimeout($conversation)) {
+			$conversation = $model->getConversation($publicId, $storeId);
+		}
 
 		$tools = new \Aichat\Tools($this->registry, $storeId, $languageId);
 		$tools->setContext($settings, $conversation, $ip);
@@ -333,11 +474,26 @@ class ControllerExtensionModuleAichat extends Controller {
 		$page = $pageContext->resolve($url);
 
 		$history = $model->getMessages($conversationId, self::HISTORY_FOR_MODEL);
-		$model->addMessage($conversationId, 'user', $message, array('page' => $this->pageMeta($page), 'url' => $url));
+		$userMeta = array('page' => $this->pageMeta($page), 'url' => $url);
+		if ($imageIds) {
+			$userMeta['images'] = $imageIds;
+		}
+		$userMessageId = $model->addMessage($conversationId, 'user', $message, $userMeta);
 		$model->touchConversation($conversationId, $url, $languageId, $customerId);
-		$guard->countMessage($storeId);
 
-		// --- not in bot mode: stage 5 (human handover) takes over here
+		if (!$isTest) {
+			$guard->countMessage($storeId);
+		}
+
+		$imageRows = array();
+		foreach ($imageIds as $imageId) {
+			$row = $uploads->get($imageId, $conversationId);
+			if ($row) {
+				$imageRows[] = $row;
+			}
+		}
+
+		// --- not in bot mode: stage 5, the visitor's message goes to the staff topic
 		$mode = $conversation['mode'] === 'closed' ? 'bot' : $conversation['mode'];
 
 		if ($conversation['mode'] === 'closed') {
@@ -345,7 +501,8 @@ class ControllerExtensionModuleAichat extends Controller {
 		}
 
 		if ($mode !== 'bot') {
-			$this->finish(array('reply' => '', 'products' => array(), 'product_groups' => array(), 'cards' => array(), 'mode' => $mode, 'message_id' => 0));
+			$handover->forwardVisitor($conversation, $message, $imageRows);
+			$this->finish(array('reply' => '', 'products' => array(), 'product_groups' => array(), 'cards' => array(), 'mode' => $mode, 'message_id' => $userMessageId));
 			return;
 		}
 
@@ -358,8 +515,11 @@ class ControllerExtensionModuleAichat extends Controller {
 		// --- prompt + conversation
 		$botName = $this->botName($store);
 		$prompt = new \Aichat\Prompt($this->registry, $settings, $tools);
+		if ($isTest) {
+			$prompt->setDraft($preview['data']);
+		}
 		$system = $prompt->system($store, $botName, $this->languageName($languageId), $page, $this->customer->isLogged() ? (string)$this->customer->getFirstName() : '', (int)$conversation['verified_order_id'], $this->customer->isLogged());
-		$messages = $this->modelMessages($history, $message);
+		$messages = $this->modelMessages($history, $message, $imageRows);
 
 		$client = new \Aichat\Client($settings->getApiKey(), $settings->getGlobal('g_model'));
 		$filter = new \Aichat\LinkFilter(\Aichat\PageContext::storeHosts($this->config));
@@ -482,14 +642,37 @@ class ControllerExtensionModuleAichat extends Controller {
 			$this->sse('error', $this->errorBody('api_error'));
 		}
 
+		// request_human may have switched the conversation to waiting
+		$after = $model->getConversation($publicId, $storeId);
+		$mode = $after && in_array($after['mode'], array('waiting', 'human'), true) ? $after['mode'] : 'bot';
+
 		$this->finish(array(
 			'reply'          => $reply,
 			'products'       => $this->flatten($groups),
 			'product_groups' => $groups,
 			'cards'          => $linkCards,
-			'mode'           => 'bot',
+			'mode'           => $mode,
 			'message_id'     => $messageId,
 		));
+	}
+
+	private function createConversation($model, \Aichat\Guard $guard, $storeId, $languageId, $customerId, $publicId, $ip, $url, $isTest) {
+		$conversationId = $model->addConversation(array(
+			'store_id'    => $storeId,
+			'language_id' => $languageId,
+			'customer_id' => $customerId,
+			'public_id'   => $publicId,
+			'ip'          => $ip,
+			'user_agent'  => isset($this->request->server['HTTP_USER_AGENT']) ? $this->request->server['HTTP_USER_AGENT'] : '',
+			'url'         => $url,
+			'is_test'     => $isTest,
+		));
+
+		if (!$isTest) {
+			$guard->countChat($storeId); // test chats are not counted (their cost still is)
+		}
+
+		return $conversationId;
 	}
 
 	/** Public only for the closures. `products` event: {label, items}; suggestion items carry label too. */
@@ -508,6 +691,529 @@ class ControllerExtensionModuleAichat extends Controller {
 		}
 
 		return array('label' => $group['label'], 'items' => $items);
+	}
+
+	// ================================================================ shared request helpers
+
+	private function jsonInput() {
+		$input = json_decode((string)file_get_contents('php://input'), true);
+
+		return is_array($input) ? $input : array();
+	}
+
+	/**
+	 * Token -> {store, store_id, public_id, conversation|null, guard, ip}, or
+	 * null after a failure reply. Bound to this store and to the logged-in
+	 * customer (never another customer's conversation). Test (preview)
+	 * conversations are not reachable with a visitor token.
+	 */
+	private function tokenContext($token, $needPost = true) {
+		$this->load->language('extension/module/aichat');
+
+		if ($needPost && $this->request->server['REQUEST_METHOD'] !== 'POST') {
+			$this->fail('method');
+			return null;
+		}
+
+		$settings = $this->settings();
+		$this->ensureSchema($settings);
+		$settings = $this->settings();
+		$storeId = (int)$this->config->get('config_store_id');
+		$store = $settings->getStore($storeId);
+
+		if (!$store['s_status'] || !$settings->hasApiKey()) {
+			$this->fail('disabled');
+			return null;
+		}
+
+		$guard = new \Aichat\Guard($this->registry, $settings);
+		$publicId = $guard->parseToken(is_string($token) ? $token : '', $storeId);
+
+		if (!$publicId) {
+			$this->fail('invalid_token');
+			return null;
+		}
+
+		$this->load->model('extension/module/aichat');
+		$conversation = $this->model_extension_module_aichat->getConversation($publicId, $storeId);
+
+		if ($conversation && (((int)$conversation['customer_id'] && (int)$conversation['customer_id'] !== (int)$this->customer->getId()) || (int)$conversation['is_test'])) {
+			$this->fail('invalid_token');
+			return null;
+		}
+
+		return array(
+			'settings'     => $settings,
+			'store'        => $store,
+			'store_id'     => $storeId,
+			'public_id'    => $publicId,
+			'token'        => (string)$token,
+			'conversation' => $conversation,
+			'guard'        => $guard,
+			'ip'           => $guard->clientIp($this->request->server),
+		);
+	}
+
+	private function limited(\Aichat\Guard $guard, array $keys) {
+		foreach ($keys as $key => $rule) {
+			if (!$guard->hit($key, $rule[0], $rule[1])) {
+				$this->fail('rate_limited');
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	// ================================================================ images (stage 4)
+
+	/** POST multipart token, file -> {id, thumb} */
+	public function upload() {
+		$ctx = $this->tokenContext(isset($this->request->post['token']) ? $this->request->post['token'] : '');
+
+		if (!$ctx) {
+			return;
+		}
+
+		if (!(int)$ctx['store']['s_feat_images']) {
+			$this->fail('feature_off');
+			return;
+		}
+
+		if ($this->limited($ctx['guard'], array('u:c:' . $ctx['public_id'] => array(600, 15), 'u:i:' . $ctx['ip'] => array(3600, 40)))) {
+			return;
+		}
+
+		$file = isset($this->request->files['file']) && is_array($this->request->files['file']) ? $this->request->files['file'] : null;
+
+		if (!$file || !isset($file['tmp_name'], $file['error']) || is_array($file['tmp_name'])) {
+			$this->fail('image_bad');
+			return;
+		}
+
+		if (in_array((int)$file['error'], array(UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE), true)) {
+			$this->fail('image_too_large', '5 MB');
+			return;
+		}
+
+		if ((int)$file['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($file['tmp_name'])) {
+			$this->fail('image_bad');
+			return;
+		}
+
+		// cheap checks before a conversation row is created for it
+		if ((int)$file['size'] > \Aichat\Uploads::MAX_BYTES || (int)@filesize($file['tmp_name']) > \Aichat\Uploads::MAX_BYTES) {
+			$this->fail('image_too_large', '5 MB');
+			return;
+		}
+
+		if (\Aichat\Uploads::sniff($file['tmp_name']) === '') {
+			$this->fail('image_type');
+			return;
+		}
+
+		$conversation = $ctx['conversation'];
+
+		if (!$conversation) {
+			$cap = (int)$ctx['store']['s_max_chats_day'];
+			if ($cap > 0 && $ctx['guard']->chatsToday($ctx['store_id']) >= $cap) {
+				$this->fail('chat_day_limit', $this->contactsLine($ctx['store']));
+				return;
+			}
+			$this->createConversation($this->model_extension_module_aichat, $ctx['guard'], $ctx['store_id'], (int)$this->config->get('config_language_id'), (int)$this->customer->getId(), $ctx['public_id'], $ctx['ip'], isset($this->request->post['url']) ? substr((string)$this->request->post['url'], 0, 2000) : '', false);
+			$conversation = $this->model_extension_module_aichat->getConversation($ctx['public_id'], $ctx['store_id']);
+		}
+
+		$uploads = new \Aichat\Uploads($this->registry);
+		$result = $uploads->store((int)$conversation['conversation_id'], $file['tmp_name'], (int)$file['size']);
+
+		if (isset($result['error'])) {
+			$map = array('too_large' => 'image_too_large', 'bad_type' => 'image_type', 'bad_image' => 'image_bad', 'limit' => 'image_count', 'storage' => 'image_storage');
+			$this->fail(isset($map[$result['error']]) ? $map[$result['error']] : 'image_bad', '5 MB');
+			return;
+		}
+
+		$this->json(array('id' => $result['upload_id'], 'thumb' => $this->imageUrl($ctx['token'], $result['upload_id'], true)));
+	}
+
+	/** GET image&token=&id=[&thumb=1]: only the owning conversation's images. */
+	public function image() {
+		$ctx = $this->tokenContext(isset($this->request->get['token']) ? $this->request->get['token'] : '', false);
+
+		if (!$ctx) {
+			$this->response->addHeader('HTTP/1.1 404 Not Found');
+			return;
+		}
+
+		$id = isset($this->request->get['id']) && is_numeric($this->request->get['id']) ? (int)$this->request->get['id'] : 0;
+		$uploads = new \Aichat\Uploads($this->registry);
+		$row = $ctx['conversation'] && $id ? $uploads->get($id, (int)$ctx['conversation']['conversation_id']) : null;
+		$file = $row ? \Aichat\Uploads::path($row, !empty($this->request->get['thumb'])) : '';
+
+		if ($file === '') {
+			$this->response->addHeader('HTTP/1.1 404 Not Found');
+			$this->response->addHeader('Content-Type: text/plain; charset=utf-8');
+			$this->response->setOutput('Not found');
+			return;
+		}
+
+		$this->response->addHeader('Content-Type: image/jpeg');
+		$this->response->addHeader('X-Content-Type-Options: nosniff');
+		$this->response->addHeader('Content-Disposition: inline; filename="image-' . $id . '.jpg"');
+		$this->response->addHeader('Cache-Control: private, max-age=86400');
+		$this->response->setOutput((string)file_get_contents($file));
+	}
+
+	// ================================================================ rating
+
+	/** POST {token, message_id, value: 1|-1} */
+	public function rate() {
+		$input = $this->jsonInput();
+		$ctx = $this->tokenContext(isset($input['token']) ? $input['token'] : '');
+
+		if (!$ctx) {
+			return;
+		}
+
+		if (!(int)$ctx['store']['s_feat_rating']) {
+			$this->fail('feature_off');
+			return;
+		}
+
+		if ($this->limited($ctx['guard'], array('r:c:' . $ctx['public_id'] => array(60, 20)))) {
+			return;
+		}
+
+		$value = isset($input['value']) && is_numeric($input['value']) ? (int)$input['value'] : 0;
+		$messageId = isset($input['message_id']) && is_numeric($input['message_id']) ? (int)$input['message_id'] : 0;
+
+		if (!in_array($value, array(1, -1, 0), true) || !$ctx['conversation'] || !$this->model_extension_module_aichat->rateMessage((int)$ctx['conversation']['conversation_id'], $messageId, $value)) {
+			$this->fail('not_found');
+			return;
+		}
+
+		$this->json(array('ok' => true));
+	}
+
+	// ================================================================ cart (OpenCart's own cart)
+
+	/** POST {token, product_id, quantity, option?} -> {ok, cart_count, cart_total, message} | {need_options} */
+	public function cart() {
+		$input = $this->jsonInput();
+		$ctx = $this->tokenContext(isset($input['token']) ? $input['token'] : '');
+
+		if (!$ctx) {
+			return;
+		}
+
+		if (!(int)$ctx['store']['s_feat_cart']) {
+			$this->fail('feature_off');
+			return;
+		}
+
+		if ($this->limited($ctx['guard'], array('k:i:' . $ctx['ip'] => array(600, 40)))) {
+			return;
+		}
+
+		$productId = isset($input['product_id']) && is_numeric($input['product_id']) ? (int)$input['product_id'] : 0;
+		$quantity = isset($input['quantity']) && is_numeric($input['quantity']) ? (int)$input['quantity'] : 1;
+		$quantity = max(1, min(999, $quantity));
+
+		// store-bound, status = 1, date_available: OpenCart's own product model
+		$this->load->model('catalog/product');
+		$product = $productId ? $this->model_catalog_product->getProduct($productId) : null;
+
+		if (!$product) {
+			$this->fail('cart_product');
+			return;
+		}
+
+		if ($this->config->get('config_customer_price') && !$this->customer->isLogged()) {
+			$this->fail('cart_login');
+			return;
+		}
+
+		if ($this->model_catalog_product->getProfiles($productId)) {
+			$this->fail('cart_options'); // subscription products: product page only
+			return;
+		}
+
+		$given = isset($input['option']) && is_array($input['option']) ? $input['option'] : array();
+		$option = array();
+		$missing = false;
+		$describe = array();
+		$chosenValues = array();
+
+		foreach ($this->model_catalog_product->getProductOptions($productId) as $po) {
+			$poid = (int)$po['product_option_id'];
+			$valid = array();
+			foreach (isset($po['product_option_value']) && is_array($po['product_option_value']) ? $po['product_option_value'] : array() as $v) {
+				$valid[(int)$v['product_option_value_id']] = $v;
+			}
+
+			$value = isset($given[$poid]) ? $given[$poid] : (isset($given[(string)$poid]) ? $given[(string)$poid] : null);
+
+			if (in_array($po['type'], array('select', 'radio'), true)) {
+				if (is_scalar($value) && isset($valid[(int)$value])) {
+					$option[$poid] = (int)$value;
+					$chosenValues[] = $valid[(int)$value];
+				}
+			} elseif ($po['type'] === 'checkbox') {
+				$list = array();
+				foreach (is_array($value) ? $value : (is_scalar($value) && $value !== '' ? array($value) : array()) as $v) {
+					if (is_scalar($v) && isset($valid[(int)$v])) {
+						$list[] = (int)$v;
+						$chosenValues[] = $valid[(int)$v];
+					}
+				}
+				if ($list) {
+					$option[$poid] = array_values(array_unique($list));
+				}
+			} elseif (in_array($po['type'], array('text', 'textarea', 'date', 'time', 'datetime'), true)) {
+				$text = is_scalar($value) ? trim($this->cleanText((string)$value)) : '';
+				$patterns = array('date' => '/^\d{4}-\d{2}-\d{2}$/', 'time' => '/^\d{2}:\d{2}$/', 'datetime' => '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/');
+				if ($text !== '' && (!isset($patterns[$po['type']]) || preg_match($patterns[$po['type']], $text))) {
+					$option[$poid] = htmlspecialchars(\Aichat\Tools::len($text) > 255 ? mb_substr($text, 0, 255, 'UTF-8') : $text, ENT_QUOTES, 'UTF-8');
+				}
+			} elseif ($po['type'] === 'file' && $po['required']) {
+				$this->fail('cart_options'); // file options: product page only
+				return;
+			}
+
+			if ($po['type'] === 'file') {
+				continue;
+			}
+
+			$values = array();
+			foreach ($valid as $v) {
+				$values[] = array(
+					'product_option_value_id' => (int)$v['product_option_value_id'],
+					'name'                    => html_entity_decode((string)$v['name'], ENT_QUOTES, 'UTF-8'),
+					'price'                   => (float)$v['price'] > 0 ? $v['price_prefix'] . $this->currency->format($this->tax->calculate($v['price'], $product['tax_class_id'], $this->config->get('config_tax') ? 'P' : false), $this->session->data['currency']) : '',
+				);
+			}
+
+			$describe[] = array(
+				'product_option_id' => $poid,
+				'name'              => html_entity_decode((string)$po['name'], ENT_QUOTES, 'UTF-8'),
+				'type'              => $po['type'],
+				'required'          => (bool)$po['required'],
+				'values'            => $values,
+			);
+
+			if ($po['required'] && !isset($option[$poid])) {
+				$missing = true;
+			}
+		}
+
+		if ($missing) {
+			$this->json(array('need_options' => $describe));
+			return;
+		}
+
+		$minimum = max(1, (int)$product['minimum']);
+
+		if ($quantity < $minimum) {
+			$this->fail('cart_minimum', $minimum);
+			return;
+		}
+
+		// stock rules: without "checkout out-of-stock" nothing beyond the stock goes in (exact stock is not told)
+		if (!$this->config->get('config_stock_checkout')) {
+			$inCart = 0;
+			foreach ($this->cart->getProducts() as $p) {
+				if ((int)$p['product_id'] === $productId) {
+					$inCart += (int)$p['quantity'];
+				}
+			}
+			if ((int)$product['quantity'] < $quantity + $inCart) {
+				$this->fail('cart_stock');
+				return;
+			}
+			foreach ($chosenValues as $v) {
+				if ((int)$v['subtract'] && (int)$v['quantity'] < $quantity) {
+					$this->fail('cart_stock');
+					return;
+				}
+			}
+		}
+
+		$this->cart->add($productId, $quantity, $option, 0);
+
+		unset($this->session->data['shipping_method'], $this->session->data['shipping_methods'], $this->session->data['payment_method'], $this->session->data['payment_methods']);
+
+		$count = $this->cart->countProducts() + (isset($this->session->data['vouchers']) ? count($this->session->data['vouchers']) : 0);
+
+		$this->json(array(
+			'ok'         => true,
+			'cart_count' => $count,
+			'cart_total' => $this->currency->format($this->cart->getTotal(), $this->session->data['currency']),
+			'message'    => sprintf($this->language->get('text_cart_added'), html_entity_decode((string)$product['name'], ENT_QUOTES, 'UTF-8')),
+		));
+	}
+
+	// ================================================================ transcript / forget
+
+	/** POST {token, email}: mails the conversation to the visitor. Rate-limited. */
+	public function transcript() {
+		$input = $this->jsonInput();
+		$ctx = $this->tokenContext(isset($input['token']) ? $input['token'] : '');
+
+		if (!$ctx) {
+			return;
+		}
+
+		$email = \Aichat\Requests::validEmail(isset($input['email']) && is_string($input['email']) ? $input['email'] : '');
+
+		if ($email === '') {
+			$this->fail('invalid_email');
+			return;
+		}
+
+		if (!$ctx['conversation']) {
+			$this->fail('not_found');
+			return;
+		}
+
+		if ($this->limited($ctx['guard'], array('t:c:' . $ctx['public_id'] => array(86400, 3), 't:i:' . $ctx['ip'] => array(86400, 10)))) {
+			return;
+		}
+
+		$info = \Aichat\Mailer::storeConfig($this->registry, $ctx['store_id']);
+		$from = \Aichat\Mailer::storeEmail($this->registry, $ctx['settings'], $ctx['store_id']);
+		$botName = $this->botName($ctx['store']);
+		$text = sprintf($this->language->get('transcript_intro'), $info['name']) . "\n\n"
+			. \Aichat\Handover::transcript($this->db, (int)$ctx['conversation']['conversation_id'], 500, array(
+				'user'      => $this->language->get('transcript_you'),
+				'assistant' => $botName,
+				'staff'     => $this->language->get('transcript_staff'),
+				'system'    => '—',
+			)) . "\n\n" . rtrim((string)$info['url'], '/') . "/\n";
+
+		$ok = \Aichat\Mailer::send($this->registry, $email, sprintf($this->language->get('transcript_subject'), $info['name']), $text, array('from' => $from, 'sender' => $info['name']));
+
+		if (!$ok) {
+			$this->fail('api_error');
+			return;
+		}
+
+		$this->json(array('ok' => true, 'message' => sprintf($this->language->get('text_transcript_sent'), $email)));
+	}
+
+	/** POST {token}: GDPR - deletes the conversation, its messages and uploads. */
+	public function forget() {
+		$input = $this->jsonInput();
+		$ctx = $this->tokenContext(isset($input['token']) ? $input['token'] : '');
+
+		if (!$ctx) {
+			return;
+		}
+
+		if ($this->limited($ctx['guard'], array('f:i:' . $ctx['ip'] => array(3600, 20)))) {
+			return;
+		}
+
+		$conversation = $ctx['conversation'];
+
+		if ($conversation) {
+			if ((string)$conversation['tg_chat_id'] !== '' && (int)$conversation['tg_topic_id'] && in_array($conversation['mode'], array('waiting', 'human'), true)) {
+				$telegram = new \Aichat\Telegram($ctx['settings']);
+				$telegram->sendMessage((string)$conversation['tg_chat_id'], (int)$conversation['tg_topic_id'], '🗑 The visitor deleted this conversation (GDPR). The chat is closed.');
+			}
+			\Aichat\Maintenance::deleteConversation($this->registry, (int)$conversation['conversation_id']);
+		}
+
+		$this->json(array('ok' => true, 'message' => $this->language->get('text_forgotten')));
+	}
+
+	// ================================================================ handover (stage 5)
+
+	/** GET poll&token=&after=<message_id> -> {mode, messages:[{message_id, role, content, staff_name?}]} */
+	public function poll() {
+		$ctx = $this->tokenContext(isset($this->request->get['token']) ? $this->request->get['token'] : '', false);
+
+		if (!$ctx) {
+			return;
+		}
+
+		if ($this->limited($ctx['guard'], array('p:c:' . $ctx['public_id'] => array(60, 40)))) {
+			return;
+		}
+
+		$conversation = $ctx['conversation'];
+
+		if (!$conversation) {
+			$this->json(array('mode' => 'bot', 'messages' => array()));
+			return;
+		}
+
+		$handover = new \Aichat\Handover($this->registry, $ctx['settings']);
+
+		if ($handover->checkTimeout($conversation)) {
+			$conversation = $this->model_extension_module_aichat->getConversation($ctx['public_id'], $ctx['store_id']);
+		}
+
+		$after = isset($this->request->get['after']) && is_numeric($this->request->get['after']) ? (int)$this->request->get['after'] : 0;
+		$messages = array();
+
+		foreach ($this->model_extension_module_aichat->getMessagesAfter((int)$conversation['conversation_id'], $after) as $row) {
+			$item = array('message_id' => (int)$row['message_id'], 'role' => $row['role'], 'content' => (string)$row['content']);
+			if ($row['role'] === 'staff' && !empty($row['meta']['staff_name'])) {
+				$item['staff_name'] = (string)$row['meta']['staff_name'];
+			}
+			if (!empty($row['meta']['cards']) && is_array($row['meta']['cards'])) {
+				$item['cards'] = array_values($row['meta']['cards']);
+			}
+			$messages[] = $item;
+		}
+
+		$mode = $conversation['mode'] === 'closed' ? 'bot' : $conversation['mode'];
+
+		$this->json(array('mode' => $mode, 'messages' => $messages));
+	}
+
+	/**
+	 * Telegram webhook: index.php?route=extension/module/aichat/telegram&s=<g_tg_secret>
+	 * plus header X-Telegram-Bot-Api-Secret-Token (same secret). Public URL:
+	 * everything else is answered 403 / ignored; only the configured groups count.
+	 */
+	public function telegram() {
+		$settings = $this->settings();
+		$this->ensureSchema($settings);
+		$settings = $this->settings();
+		$secret = $settings->telegramSecret();
+		$path = isset($this->request->get['s']) && is_string($this->request->get['s']) ? $this->request->get['s'] : '';
+		$header = isset($this->request->server['HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN']) ? (string)$this->request->server['HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'] : '';
+
+		$this->response->addHeader('Content-Type: application/json; charset=utf-8');
+
+		if ($this->request->server['REQUEST_METHOD'] !== 'POST' || !hash_equals($secret, $path) || !hash_equals($secret, $header)) {
+			$this->response->addHeader('HTTP/1.1 403 Forbidden');
+			$this->response->setOutput('{"ok":false}');
+			return;
+		}
+
+		$raw = (string)file_get_contents('php://input');
+		$update = strlen($raw) <= 65536 ? json_decode($raw, true) : null;
+		$result = 'ignored';
+
+		if (is_array($update) && isset($update['update_id']) && is_numeric($update['update_id'])) {
+			$guard = new \Aichat\Guard($this->registry, $settings);
+			// Telegram re-delivers on errors: each update_id once
+			if ($guard->hit('tg:u:' . (int)$update['update_id'], 86400 * 2, 1)) {
+				try {
+					$handover = new \Aichat\Handover($this->registry, $settings);
+					$result = $handover->handleUpdate($update);
+				} catch (\Exception $e) {
+					$this->log->write('AI Chat telegram: ' . $e->getMessage());
+					$result = 'error';
+				}
+			} else {
+				$result = 'duplicate';
+			}
+		}
+
+		$this->response->setOutput(json_encode(array('ok' => true, 'result' => $result)));
 	}
 
 	// ================================================================ footer event
@@ -635,7 +1341,7 @@ class ControllerExtensionModuleAichat extends Controller {
 	 * Stored history -> Messages API turns. Staff replies become assistant
 	 * turns; shown product cards are noted so the model knows what it showed.
 	 */
-	private function modelMessages(array $history, $current) {
+	private function modelMessages(array $history, $current, array $imageRows = array()) {
 		$turns = array();
 
 		foreach ($history as $row) {
@@ -643,7 +1349,11 @@ class ControllerExtensionModuleAichat extends Controller {
 			$text = trim((string)$row['content']);
 
 			if ($row['role'] === 'staff') {
-				$text = '[Store staff]: ' . $text;
+				$text = '[Store staff' . (!empty($row['meta']['staff_name']) ? ' ' . $row['meta']['staff_name'] : '') . ']: ' . $text;
+			}
+
+			if ($role === 'user' && !empty($row['meta']['images']) && is_array($row['meta']['images'])) {
+				$text .= ($text !== '' ? "\n" : '') . '[Attached images earlier: #' . implode(', #', array_map('intval', $row['meta']['images'])) . ']';
 			}
 
 			if ($role === 'assistant' && !empty($row['meta']['products'])) {
@@ -688,12 +1398,34 @@ class ControllerExtensionModuleAichat extends Controller {
 			array_shift($turns);
 		}
 
+		if ($imageRows) {
+			$ids = array();
+			foreach ($imageRows as $img) {
+				$ids[] = (int)$img['upload_id'];
+			}
+			$current = '[Attached images: #' . implode(', #', $ids) . ']' . ($current !== '' ? "\n" . $current : '');
+		}
+
 		$n = count($turns);
 
 		if ($n && $turns[$n - 1]['role'] === 'user') {
 			$turns[$n - 1]['content'] .= "\n\n" . $current;
 		} else {
 			$turns[] = array('role' => 'user', 'content' => $current);
+		}
+
+		// vision: image blocks first, then the text of the turn
+		if ($imageRows) {
+			$n = count($turns);
+			$blocks = array();
+			foreach ($imageRows as $img) {
+				$block = \Aichat\Uploads::contentBlock($img);
+				if ($block) {
+					$blocks[] = $block;
+				}
+			}
+			$blocks[] = array('type' => 'text', 'text' => $turns[$n - 1]['content']);
+			$turns[$n - 1]['content'] = $blocks;
 		}
 
 		return $turns;
@@ -799,7 +1531,6 @@ class ControllerExtensionModuleAichat extends Controller {
 			return;
 		}
 
-		unset($data['message_id']);
 		$this->json($data);
 	}
 

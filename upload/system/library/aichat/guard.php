@@ -52,6 +52,38 @@ class Guard {
 		return $m[1];
 	}
 
+	/**
+	 * Preview (admin test chat) token for an aichat_preview row:
+	 * "p<preview_id>.<hmac>". The admin controller calls
+	 * \Aichat\Guard::makePreviewToken($previewId, $this->registry) and relays
+	 * messages to the store's catalog `send` with the extra field `preview`.
+	 */
+	public static function makePreviewToken($previewId, $registry) {
+		$settings = new Settings($registry);
+
+		return 'p' . (int)$previewId . '.' . self::previewSig((int)$previewId, $settings->getSecret());
+	}
+
+	/** preview_id of a valid preview token, or 0. */
+	public function parsePreviewToken($token) {
+		if (!is_string($token) || !preg_match('/^p(\d{1,10})\.([A-Za-z0-9_-]{22})$/', $token, $m)) {
+			return 0;
+		}
+
+		return hash_equals(self::previewSig((int)$m[1], $this->settings->getSecret()), $m[2]) ? (int)$m[1] : 0;
+	}
+
+	/** The test conversation of a preview has a fixed public_id derived from it. */
+	public function previewPublicId($previewId) {
+		return substr(hash_hmac('sha256', 'aichat|preview-conv|' . (int)$previewId, $this->settings->getSecret()), 0, 32);
+	}
+
+	private static function previewSig($previewId, $secret) {
+		$raw = hash_hmac('sha256', 'aichat|preview|' . (int)$previewId, $secret, true);
+
+		return rtrim(strtr(base64_encode(substr($raw, 0, 16)), '+/', '-_'), '=');
+	}
+
 	private function sign($publicId, $storeId) {
 		$raw = hash_hmac('sha256', 'aichat|' . $publicId . '|' . (int)$storeId, $this->settings->getSecret(), true);
 
@@ -375,11 +407,14 @@ class Guard {
 		);
 	}
 
-	/** Price of one API response's usage (USD), from the owner-entered per-MTok prices. */
-	public function cost($usage) {
+	/**
+	 * Price of one API response's usage (USD), from the owner-entered per-MTok
+	 * prices; $light = true uses the light model's prices (translation).
+	 */
+	public function cost($usage, $light = false) {
 		$t = self::tokens($usage);
-		$priceIn = (float)$this->settings->getGlobal('g_price_in');
-		$priceOut = (float)$this->settings->getGlobal('g_price_out');
+		$priceIn = (float)$this->settings->getGlobal($light ? 'g_price_light_in' : 'g_price_in');
+		$priceOut = (float)$this->settings->getGlobal($light ? 'g_price_light_out' : 'g_price_out');
 
 		$input = $t['input'] + $t['cache_write'] * self::CACHE_WRITE_FACTOR + $t['cache_read'] * self::CACHE_READ_FACTOR;
 
@@ -390,9 +425,9 @@ class Guard {
 	 * Records one API call: daily usage row + conversation totals. Returns
 	 * array(prompt_tokens, output_tokens, cost).
 	 */
-	public function recordUsage($storeId, $conversationId, $usage) {
+	public function recordUsage($storeId, $conversationId, $usage, $light = false) {
 		$t = self::tokens($usage);
-		$cost = $this->cost($usage);
+		$cost = $this->cost($usage, $light);
 
 		$this->bumpDay($storeId, 0, 0, $t['prompt'], $t['output'], $cost);
 

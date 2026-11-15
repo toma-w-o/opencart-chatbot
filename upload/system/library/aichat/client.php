@@ -209,6 +209,36 @@ class Client {
 		return $this->result($full, $stopReason, null, $toolCalls, $rounds);
 	}
 
+	/**
+	 * One non-streaming call without tools (translation with the light model).
+	 *
+	 * @return array text, usage, error (null|array)
+	 */
+	public function simple($systemText, $userText) {
+		$body = array(
+			'model'      => $this->model,
+			'max_tokens' => $this->maxTokens,
+			'system'     => array(array('type' => 'text', 'text' => (string)$systemText, 'cache_control' => array('type' => 'ephemeral'))),
+			'messages'   => array(array('role' => 'user', 'content' => (string)$userText)),
+		);
+
+		if ($this->effort) {
+			$body['output_config'] = array('effort' => $this->effort);
+		}
+
+		$response = $this->request($body, false);
+		$usage = isset($response['message']['usage']) && is_array($response['message']['usage']) ? $response['message']['usage'] : array();
+
+		if (!$response['ok']) {
+			return array('text' => '', 'usage' => $usage, 'error' => $response['error']);
+		}
+
+		$content = isset($response['message']['content']) && is_array($response['message']['content']) ? $response['message']['content'] : array();
+		$stop = isset($response['message']['stop_reason']) ? $response['message']['stop_reason'] : '';
+
+		return array('text' => $stop === 'refusal' ? '' : trim(self::textOf($content)), 'usage' => $usage, 'error' => null);
+	}
+
 	private function result($text, $stopReason, $error, $toolCalls, $rounds) {
 		return array('text' => $text, 'stop_reason' => $stopReason, 'error' => $error, 'tool_calls' => $toolCalls, 'rounds' => $rounds);
 	}

@@ -45,3 +45,62 @@ $_['error_refusal']        = 'Sorry, I cannot help with that. For anything about
 $_['error_turnstile']      = 'Please confirm that you are not a robot and try again.';
 $_['error_contacts_page']  = 'see our Contact page';
 $_['error_challenge']      = 'Please wait a moment, we are checking that you are not a robot.';
+
+// Round 3: widget (sent in boot.strings without the widget_ prefix)
+$_['widget_attach']           = 'Attach a photo';
+$_['widget_attach_limit']     = 'Up to 3 photos per message';
+$_['widget_uploading']        = 'Uploading…';
+$_['widget_remove_image']     = 'Remove photo';
+$_['widget_rate_up']          = 'Helpful';
+$_['widget_rate_down']        = 'Not helpful';
+$_['widget_rate_thanks']      = 'Thank you for the feedback!';
+$_['widget_add_to_cart']      = 'Add to cart';
+$_['widget_added_to_cart']    = 'Added to cart';
+$_['widget_choose_options']   = 'Choose options';
+$_['widget_required']         = 'required';
+$_['widget_view_cart']        = 'View cart';
+$_['widget_quantity']         = 'Quantity';
+$_['widget_menu']             = 'More';
+$_['widget_transcript']       = 'E-mail me this conversation';
+$_['widget_email_placeholder'] = 'Your e-mail';
+$_['widget_forget']           = 'Delete this conversation';
+$_['widget_forget_confirm']   = 'Delete this conversation and its photos for good?';
+$_['widget_cancel']           = 'Cancel';
+$_['widget_confirm']          = 'Confirm';
+$_['widget_sound_on']         = 'Sound on';
+$_['widget_sound_off']        = 'Sound off';
+$_['widget_waiting']          = 'Waiting for a colleague to join…';
+$_['widget_human']            = 'You are chatting with our team';
+$_['widget_staff']            = 'Team';
+$_['widget_proactive']        = 'Hi! Need help choosing? Ask me anything 🙂';
+$_['widget_new_message']      = 'New message';
+
+// Round 3: errors
+$_['error_image_too_large']  = 'The photo is too large (max. %s).';
+$_['error_image_type']       = 'Only JPEG, PNG or WebP photos can be sent.';
+$_['error_image_bad']        = 'This photo could not be read. Please try another one.';
+$_['error_image_count']      = 'Too many photos in this conversation.';
+$_['error_image_storage']    = 'The photo could not be saved. Please try again later.';
+$_['error_image_limit']      = 'Up to %s photos per message.';
+$_['error_image_not_found']  = 'A photo is no longer available. Please attach it again.';
+$_['error_feature_off']      = 'This function is not available.';
+$_['error_not_found']        = 'Not found.';
+$_['error_invalid_email']    = 'Please enter a valid e-mail address.';
+$_['error_cart_product']     = 'This product cannot be added to the cart.';
+$_['error_cart_login']       = 'Please log in to buy this product.';
+$_['error_cart_options']     = 'Please choose the options on the product page.';
+$_['error_cart_minimum']     = 'The minimum quantity for this product is %s.';
+$_['error_cart_stock']       = 'Sorry, this quantity is not available right now.';
+
+// Round 3: messages written by the server
+$_['text_cart_added']        = '%s was added to your cart.';
+$_['text_transcript_sent']   = 'The conversation was sent to %s.';
+$_['text_forgotten']         = 'The conversation was deleted.';
+$_['transcript_subject']     = '%s: your chat conversation';
+$_['transcript_intro']       = 'Your conversation with the assistant of %s:';
+$_['transcript_you']         = 'You';
+$_['transcript_staff']       = 'Team';
+$_['handover_joined']        = '%s joined the chat';
+$_['handover_done']          = 'The assistant is back. How else can I help?';
+$_['handover_timeout']       = 'Sorry, nobody from our team is free right now. Leave your e-mail or phone number and we will get back to you as soon as possible.';
+$_['widget_photo']            = 'Photo';

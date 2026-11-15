@@ -28,7 +28,12 @@ class Tools {
 	private $linkCards = array();
 	private $settings = null;
 	private $orders = null;
+	private $conversation = null;
+	private $ip = '';
+	private $hasOptions = array();
 	private static $mainCategoryColumn = null;
+
+	const MAX_REQUESTS = 5;
 
 	public function __construct($registry, $storeId = null, $languageId = null) {
 		$this->registry = $registry;
@@ -45,6 +50,8 @@ class Tools {
 	 */
 	public function setContext(Settings $settings, $conversation, $ip) {
 		$this->settings = $settings;
+		$this->conversation = is_array($conversation) ? $conversation : null;
+		$this->ip = (string)$ip;
 		$this->orders = new Orders($this->registry, $settings, $this->storeId, $this->languageId);
 		$this->orders->setConversation($conversation, $ip);
 	}
@@ -68,23 +75,24 @@ class Tools {
 				'input_schema' => array(
 					'type'       => 'object',
 					'properties' => array(
-						'query'       => array('type' => 'string', 'description' => 'Keywords or a product code. 1-6 words.'),
-						'category_id' => array('type' => 'integer', 'description' => 'Optional: only products in this category (and its subcategories). Ids come from the category tree or list_categories.'),
-						'limit'       => array('type' => 'integer', 'description' => 'Max results, 1-10. Default 5.'),
+						'query'         => array('type' => 'string', 'description' => 'Keywords or a product code. 1-6 words. Optional when similar_to is given.'),
+						'category_id'   => array('type' => 'integer', 'description' => 'Optional: only products in this category (and its subcategories). Ids come from the category tree or list_categories.'),
+						'limit'         => array('type' => 'integer', 'description' => 'Max results, 1-10. Default 5.'),
+						'in_stock_only' => array('type' => 'boolean', 'description' => 'Only products that are in stock now.'),
+						'similar_to'    => array('type' => 'integer', 'description' => 'product_id: find the closest alternatives to this product (same categories, similar price), e.g. when it is out of stock. Combine with in_stock_only.'),
 					),
-					'required'             => array('query'),
 					'additionalProperties' => false,
 				),
 			),
 			array(
 				'name'        => 'get_product',
-				'description' => 'Full details of one product of this store: price, special price, availability, description, attributes, options, manufacturer, minimum quantity. Call it before answering detailed questions about a specific product (size, material, age, compatibility, options).',
+				'description' => 'Full details of a product of this store: price, special price, availability, a plain-text description excerpt, attributes, options (with availability per value), manufacturer, minimum quantity. Call it before answering detailed questions about a specific product (size, material, age, compatibility, options). For a comparison pass 2-3 ids in product_ids and write the comparison yourself in sentences.',
 				'input_schema' => array(
 					'type'       => 'object',
 					'properties' => array(
-						'product_id' => array('type' => 'integer', 'description' => 'Product id from search_products or the page context.'),
+						'product_id'  => array('type' => 'integer', 'description' => 'Product id from search_products or the page context.'),
+						'product_ids' => array('type' => 'array', 'items' => array('type' => 'integer'), 'description' => 'Instead of product_id: 2-3 product ids to compare.'),
 					),
-					'required'             => array('product_id'),
 					'additionalProperties' => false,
 				),
 			),
@@ -246,6 +254,72 @@ class Tools {
 					'additionalProperties' => false,
 				),
 			),
+			array(
+				'name'        => 'search_kb',
+				'description' => 'Search the store\'s approved answers (knowledge base) for a question that is not covered by the approved answers in your instructions. Use before saying you do not know a store-specific fact.',
+				'input_schema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'query' => array('type' => 'string', 'description' => 'Keywords of the question.'),
+					),
+					'required'             => array('query'),
+					'additionalProperties' => false,
+				),
+			),
+			array(
+				'name'        => 'stock_alert',
+				'description' => 'Notify-me for an out-of-stock product: the store e-mails the customer when it is back. Ask for the customer\'s e-mail first (and confirm the product).',
+				'input_schema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'product_id' => array('type' => 'integer', 'description' => 'The out-of-stock product.'),
+						'email'      => array('type' => 'string', 'description' => 'Customer\'s e-mail as they wrote it.'),
+					),
+					'required'             => array('product_id', 'email'),
+					'additionalProperties' => false,
+				),
+			),
+			array(
+				'name'        => 'return_request',
+				'description' => 'Register a return / complaint for a product of an order that was verified in this chat (find_order) or belongs to the logged-in customer. Gather the details conversationally first. The store receives it by e-mail and contacts the customer.',
+				'input_schema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'order_id'  => array('type' => 'string', 'description' => 'Order number.'),
+						'product'   => array('type' => 'string', 'description' => 'Which product of the order (name or model as in the order).'),
+						'reason'    => array('type' => 'string', 'enum' => array('damaged', 'wrong_item', 'defective', 'not_as_described', 'changed_mind', 'other')),
+						'details'   => array('type' => 'string', 'description' => 'What happened, in the customer\'s words (short).'),
+						'image_ids' => array('type' => 'array', 'items' => array('type' => 'integer'), 'description' => 'Ids of photos the customer attached in this chat (shown as [Attached images: #id]).'),
+					),
+					'required'             => array('order_id', 'product', 'reason', 'details'),
+					'additionalProperties' => false,
+				),
+			),
+			array(
+				'name'        => 'request_human',
+				'description' => 'Ask a colleague from the team to join this chat (live, through the store\'s staff chat). Use it when the customer asks for a person, or when you cannot help and a person is needed. The result says whether someone was notified or nobody is available (then collect a contact with leave_contact).',
+				'input_schema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'reason' => array('type' => 'string', 'description' => 'One short sentence for the staff: what the customer needs.'),
+					),
+					'required'             => array('reason'),
+					'additionalProperties' => false,
+				),
+			),
+			array(
+				'name'        => 'leave_contact',
+				'description' => 'Pass the customer\'s contact to the team (e-mail and/or phone, with a short note of what it is about). The store receives it with the whole conversation by e-mail and gets back to the customer. Use when nobody is available live or the customer prefers to be contacted.',
+				'input_schema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'email' => array('type' => 'string'),
+						'phone' => array('type' => 'string'),
+						'note'  => array('type' => 'string', 'description' => 'What the customer needs, one or two sentences.'),
+					),
+					'additionalProperties' => false,
+				),
+			),
 		);
 
 		if ($eagerStreaming) {
@@ -271,19 +345,66 @@ class Tools {
 		try {
 			switch ($name) {
 				case 'search_products':
-					if (!isset($input['query']) || !is_string($input['query']) || trim($input['query']) === '') {
-						return $this->error('query (string) is required');
+					$query = isset($input['query']) && is_string($input['query']) ? $input['query'] : '';
+					$similar = isset($input['similar_to']) && is_numeric($input['similar_to']) ? (int)$input['similar_to'] : 0;
+					if (trim($query) === '' && !$similar) {
+						return $this->error('query (string) or similar_to (product_id) is required');
 					}
 					$category = isset($input['category_id']) && is_numeric($input['category_id']) ? (int)$input['category_id'] : 0;
 					$limit = isset($input['limit']) && is_numeric($input['limit']) ? (int)$input['limit'] : 5;
-					return $this->ok($this->searchProducts($input['query'], $category, $limit));
+					$inStock = !empty($input['in_stock_only']) && $input['in_stock_only'] !== 'false';
+					if ($similar) {
+						$result = $this->similarProducts($similar, $query, $category, $limit, $inStock);
+						return $result === null ? $this->error('similar_to: product not found in this store') : $this->ok($result);
+					}
+					return $this->ok($this->searchProducts($query, $category, $limit, $inStock));
 
 				case 'get_product':
+					if (isset($input['product_ids']) && is_array($input['product_ids']) && $input['product_ids']) {
+						$ids = array_slice(array_values(array_unique(array_filter(array_map('intval', $input['product_ids'])))), 0, 3);
+						$list = array();
+						$missing = array();
+						foreach ($ids as $id) {
+							$p = $this->getProduct($id, count($ids) > 1 ? 700 : 1500);
+							if ($p) {
+								$list[] = $p;
+							} else {
+								$missing[] = $id;
+							}
+						}
+						return $list ? $this->ok(array('products' => $list, 'not_found' => $missing, 'note' => count($list) > 1 ? 'Compare in a few sentences (no table), from these details only.' : '')) : $this->error('products not found in this store');
+					}
 					if (!isset($input['product_id']) || !is_numeric($input['product_id'])) {
-						return $this->error('product_id (integer) is required');
+						return $this->error('product_id (integer) or product_ids (array) is required');
 					}
 					$product = $this->getProduct((int)$input['product_id']);
 					return $product ? $this->ok($product) : $this->error('product not found in this store');
+
+				case 'search_kb':
+					if (!isset($input['query']) || !is_string($input['query']) || trim($input['query']) === '') {
+						return $this->error('query (string) is required');
+					}
+					return $this->ok($this->searchKb($input['query']));
+
+				case 'stock_alert':
+					return $this->ok($this->stockAlert(isset($input['product_id']) ? $input['product_id'] : 0, isset($input['email']) ? $input['email'] : ''));
+
+				case 'return_request':
+					return $this->ok($this->returnRequest($input));
+
+				case 'request_human':
+					if (!$this->conversation || !$this->settings) {
+						return $this->error('not available');
+					}
+					$handover = new Handover($this->registry, $this->settings);
+					$result = $handover->request($this->conversation, isset($input['reason']) && is_string($input['reason']) ? $input['reason'] : '');
+					if ($result['status'] === 'waiting') {
+						$this->conversation['mode'] = 'waiting';
+					}
+					return $this->ok($result);
+
+				case 'leave_contact':
+					return $this->ok($this->leaveContact($input));
 
 				case 'list_categories':
 					$parent = isset($input['parent_id']) && is_numeric($input['parent_id']) ? (int)$input['parent_id'] : 0;
@@ -424,7 +545,7 @@ class Tools {
 
 	// ================================================================ products
 
-	public function searchProducts($query, $categoryId = 0, $limit = 5) {
+	public function searchProducts($query, $categoryId = 0, $limit = 5, $inStockOnly = false) {
 		$limit = max(1, min(self::MAX_SEARCH, (int)$limit));
 		$words = self::words($query);
 
@@ -432,11 +553,15 @@ class Tools {
 			return array('query' => $query, 'products' => array());
 		}
 
-		$rows = $this->searchRows($words, $query, $categoryId, $limit + 1, true);
+		$rows = $this->searchRows($words, $query, $categoryId, $limit + 1, true, $inStockOnly);
 
 		// No product matches all words: rank by how many words match
 		if (!$rows && count($words) > 1) {
-			$rows = $this->searchRows($words, $query, $categoryId, $limit + 1, false);
+			$rows = $this->searchRows($words, $query, $categoryId, $limit + 1, false, $inStockOnly);
+		}
+
+		if (!$rows && !$inStockOnly) {
+			$this->logMiss($query);
 		}
 
 		$more = count($rows) > $limit;
@@ -507,7 +632,7 @@ class Tools {
 	 * One indexed-join query: name, model, sku and tag LIKE per word. No
 	 * description scans. $all = every word must match (else any word).
 	 */
-	private function searchRows(array $words, $query, $categoryId, $limit, $all) {
+	private function searchRows(array $words, $query, $categoryId, $limit, $all, $inStockOnly = false) {
 		$conds = array();
 		$scores = array();
 
@@ -527,6 +652,10 @@ class Tools {
 
 		if ($categoryId > 0) {
 			$sql .= " AND EXISTS (SELECT 1 FROM `" . DB_PREFIX . "product_to_category` p2c JOIN `" . DB_PREFIX . "category_path` cp ON (cp.category_id = p2c.category_id) WHERE p2c.product_id = p.product_id AND cp.path_id = '" . (int)$categoryId . "')";
+		}
+
+		if ($inStockOnly) {
+			$sql .= " AND p.quantity > 0";
 		}
 
 		$sql .= " ORDER BY score DESC, (p.quantity > 0) DESC, p.sort_order ASC, pd.name ASC LIMIT " . (int)$limit;
@@ -713,7 +842,7 @@ class Tools {
 		return self::$mainCategoryColumn;
 	}
 
-	public function getProduct($productId) {
+	public function getProduct($productId, $descriptionMax = 1500) {
 		$rows = $this->productRows(array($productId));
 
 		if (!$rows) {
@@ -737,7 +866,11 @@ class Tools {
 			$product['minimum_quantity'] = (int)$row['minimum'];
 		}
 
-		$product['description'] = $this->plain(isset($extra['description']) ? $extra['description'] : '', 1500);
+		$product['description'] = $this->plain(isset($extra['description']) ? $extra['description'] : '', (int)$descriptionMax);
+
+		if ($product['in_stock'] === 'no') {
+			$product['note'] = 'Out of stock: offer the closest in-stock alternatives (search_products with similar_to ' . (int)$productId . ' and in_stock_only true) and a notify-me (stock_alert).';
+		}
 
 		// Attributes
 		$attributes = $this->db->query("SELECT agd.name AS grp, ad.name, pa.text FROM `" . DB_PREFIX . "product_attribute` pa"
@@ -839,14 +972,30 @@ class Tools {
 			$image = $model ? (string)$model->resize($file, $width, $height) : '';
 		}
 
+		$hasOptions = $this->hasOptions((int)$row['product_id']);
+		$settings = $this->settings ? $this->settings : new Settings($this->registry);
+		$canBuy = (int)$settings->getStore($this->storeId, 's_feat_cart') === 1
+			&& $prices['price'] !== null
+			&& ((int)$row['quantity'] > 0 || (int)$this->config->get('config_stock_checkout') === 1);
+
 		return array(
-			'product_id' => (int)$row['product_id'],
-			'name'       => $this->text($row['name']),
-			'href'       => $url ? str_replace('&amp;', '&', $url->link('product/product', 'product_id=' . (int)$row['product_id'])) : '',
-			'image'      => $image,
-			'price'      => $prices['price'] === null ? '' : $prices['price'],
-			'special'    => $prices['special'],
+			'product_id'  => (int)$row['product_id'],
+			'name'        => $this->text($row['name']),
+			'href'        => $url ? str_replace('&amp;', '&', $url->link('product/product', 'product_id=' . (int)$row['product_id'])) : '',
+			'image'       => $image,
+			'price'       => $prices['price'] === null ? '' : $prices['price'],
+			'special'     => $prices['special'],
+			'can_buy'     => $canBuy,
+			'has_options' => $hasOptions,
 		);
+	}
+
+	private function hasOptions($productId) {
+		if (!isset($this->hasOptions[$productId])) {
+			$this->hasOptions[$productId] = (int)$this->db->query("SELECT COUNT(*) AS n FROM `" . DB_PREFIX . "product_option` WHERE `product_id` = '" . (int)$productId . "'")->row['n'] > 0;
+		}
+
+		return $this->hasOptions[$productId];
 	}
 
 	/** Cards for stored product ids (history replay). */
@@ -1171,6 +1320,306 @@ class Tools {
 		$result = $this->getInformation((int)$informationId);
 
 		return !empty($result['found']) ? $result['title'] : null;
+	}
+
+	// ================================================================ alternatives, search misses
+
+	/**
+	 * Closest alternatives to a product: same categories (deepest shared
+	 * first), similar price, optionally in stock and matching words.
+	 */
+	public function similarProducts($productId, $query = '', $categoryId = 0, $limit = 5, $inStockOnly = true) {
+		$base = $this->productRows(array($productId));
+
+		if (!$base) {
+			return null;
+		}
+
+		$base = $base[0];
+		$limit = max(1, min(self::MAX_SEARCH, (int)$limit));
+		$cats = array();
+
+		foreach ($this->db->query("SELECT p2c.category_id FROM `" . DB_PREFIX . "product_to_category` p2c"
+			. " JOIN `" . DB_PREFIX . "category` c ON (c.category_id = p2c.category_id AND c.status = '1')"
+			. " JOIN `" . DB_PREFIX . "category_to_store` c2s ON (c2s.category_id = p2c.category_id AND c2s.store_id = '" . (int)$this->storeId . "')"
+			. " WHERE p2c.product_id = '" . (int)$productId . "'")->rows as $row) {
+			$cats[] = (int)$row['category_id'];
+		}
+
+		$score = array();
+
+		if ($cats) {
+			$score[] = "(SELECT COUNT(*) FROM `" . DB_PREFIX . "product_to_category` x WHERE x.product_id = p.product_id AND x.category_id IN (" . implode(',', $cats) . ")) * 4";
+		}
+
+		foreach (self::words($query) as $word) {
+			$score[] = "(pd.name LIKE " . $this->like(self::stem($word)) . ") * 3";
+		}
+
+		$sql = $this->productSelect() . ", " . ($score ? implode(' + ', $score) : '0') . " AS score" . $this->productFrom()
+			. " AND p.product_id <> '" . (int)$productId . "'";
+
+		if ($cats) {
+			$sql .= " AND EXISTS (SELECT 1 FROM `" . DB_PREFIX . "product_to_category` y WHERE y.product_id = p.product_id AND y.category_id IN (" . implode(',', $cats) . "))";
+		} elseif (!self::words($query)) {
+			return array('similar_to' => (int)$productId, 'products' => array(), 'note' => 'No category to compare with; try search_products with keywords.');
+		}
+
+		if ($categoryId > 0) {
+			$sql .= " AND EXISTS (SELECT 1 FROM `" . DB_PREFIX . "product_to_category` p2c JOIN `" . DB_PREFIX . "category_path` cp ON (cp.category_id = p2c.category_id) WHERE p2c.product_id = p.product_id AND cp.path_id = '" . (int)$categoryId . "')";
+		}
+
+		if ($inStockOnly) {
+			$sql .= " AND p.quantity > 0";
+		}
+
+		$sql .= " ORDER BY score DESC, ABS(p.price - " . sprintf('%.4F', (float)$base['price']) . ") ASC, p.sort_order ASC LIMIT " . (int)$limit;
+
+		return array(
+			'similar_to' => (int)$productId,
+			'products'   => $this->present($this->db->query($sql)->rows, false),
+			'note'       => 'Closest alternatives by category and price. Recommend only those that really fit what the customer wanted.',
+		);
+	}
+
+	/** Searches with zero results: aichat_search_miss (store, language, query, hits, last date). */
+	private function logMiss($query) {
+		if ($this->conversation && !empty($this->conversation['is_test'])) {
+			return;
+		}
+
+		$q = function_exists('mb_strtolower') ? mb_strtolower(trim(preg_replace('/\s+/u', ' ', (string)$query)), 'UTF-8') : strtolower(trim((string)$query));
+		$q = function_exists('mb_substr') ? mb_substr($q, 0, 190, 'UTF-8') : substr($q, 0, 190);
+
+		if ($q === '') {
+			return;
+		}
+
+		$this->db->query("INSERT INTO `" . DB_PREFIX . "aichat_search_miss` (`store_id`, `language_id`, `query`, `hits`, `date_modified`) VALUES ('" . (int)$this->storeId . "', '" . (int)$this->languageId . "', '" . $this->db->escape($q) . "', 1, NOW())
+			ON DUPLICATE KEY UPDATE `hits` = `hits` + 1, `date_modified` = NOW()");
+	}
+
+	// ================================================================ knowledge base
+
+	private function kbWhere() {
+		return " WHERE `status` = '1' AND `store_id` IN ('-1', '" . (int)$this->storeId . "') AND `language_id` IN ('0', '" . (int)$this->languageId . "')";
+	}
+
+	/** Newest active approved answers of this store + language (prompt). */
+	public function kbRows($limit) {
+		return $this->db->query("SELECT `kb_id`, `question`, `answer` FROM `" . DB_PREFIX . "aichat_kb`" . $this->kbWhere() . " ORDER BY `date_added` DESC, `kb_id` DESC LIMIT " . (int)$limit)->rows;
+	}
+
+	public function searchKb($query) {
+		$words = self::words($query);
+		$out = array();
+
+		if ($words) {
+			$conds = array();
+			$score = array();
+			foreach ($words as $word) {
+				$like = $this->like(self::stem($word));
+				$conds[] = "(`question` LIKE " . $like . " OR `answer` LIKE " . $like . ")";
+				$score[] = "(`question` LIKE " . $like . ") * 2 + (`answer` LIKE " . $like . ")";
+			}
+			$rows = $this->db->query("SELECT `kb_id`, `question`, `answer`, (" . implode(' + ', $score) . ") AS score FROM `" . DB_PREFIX . "aichat_kb`" . $this->kbWhere() . " AND (" . implode(' OR ', $conds) . ") ORDER BY score DESC, `date_added` DESC LIMIT 5")->rows;
+			foreach ($rows as $row) {
+				$out[] = array('question' => $this->text($row['question']), 'answer' => $this->plain($row['answer'], 2000));
+			}
+		}
+
+		return array('answers' => $out, 'note' => $out ? 'Approved answers of the store: answer from them.' : 'No approved answer found; use the information pages or say you do not know.');
+	}
+
+	// ================================================================ requests (stock alert, return, contact)
+
+	private function requests() {
+		return new Requests($this->registry, $this->settings ? $this->settings : new Settings($this->registry));
+	}
+
+	private function requestGate() {
+		if (!$this->conversation) {
+			return array('ok' => false, 'message' => 'Not available in this chat.');
+		}
+
+		if ($this->requests()->countForConversation((int)$this->conversation['conversation_id']) >= self::MAX_REQUESTS) {
+			return array('ok' => false, 'message' => 'Too many requests in this chat; give the customer the store contacts instead.');
+		}
+
+		return null;
+	}
+
+	public function stockAlert($productId, $email) {
+		$gate = $this->requestGate();
+
+		if ($gate) {
+			return $gate;
+		}
+
+		$email = Requests::validEmail(is_scalar($email) ? $email : '');
+
+		if ($email === '') {
+			return array('ok' => false, 'message' => 'That does not look like a valid e-mail address; ask the customer to check it.');
+		}
+
+		$rows = $this->productRows(array(is_numeric($productId) ? (int)$productId : 0));
+
+		if (!$rows) {
+			return array('ok' => false, 'message' => 'Product not found in this store.');
+		}
+
+		$row = $rows[0];
+
+		if ((int)$row['quantity'] > 0) {
+			return array('ok' => false, 'in_stock' => true, 'message' => 'This product is in stock now; no notification needed.');
+		}
+
+		$requests = $this->requests();
+
+		if ($requests->openStockAlertExists($this->storeId, (int)$row['product_id'], $email)) {
+			return array('ok' => true, 'message' => 'This e-mail is already registered for this product.');
+		}
+
+		$id = $requests->add(array(
+			'store_id'        => $this->storeId,
+			'conversation_id' => (int)$this->conversation['conversation_id'],
+			'type'            => 'stock',
+			'product_id'      => (int)$row['product_id'],
+			'email'           => $email,
+			'data'            => array('product' => $this->text($row['name']), 'model' => $this->text($row['model']), 'language_id' => $this->languageId),
+		));
+
+		$requests->mailStore($this->storeId, $this->testPrefix() . 'AI Chat: stock alert #' . $id . ' – ' . $this->text($row['name']),
+			"A customer wants to be notified when this product is back in stock.\n\n"
+			. "Product: " . $this->text($row['name']) . " (#" . (int)$row['product_id'] . ", " . $this->text($row['model']) . ")\n"
+			. "E-mail: " . $email . "\n"
+			. "Chat: #" . (int)$this->conversation['conversation_id'] . "\n\n"
+			. "Клиент иска известие, когато продуктът е наличен.\n", $email);
+
+		return array('ok' => true, 'request_id' => $id, 'message' => 'Registered: the store will e-mail the customer when the product is back in stock. Do not promise a date.');
+	}
+
+	public function returnRequest(array $input) {
+		$gate = $this->requestGate();
+
+		if ($gate) {
+			return $gate;
+		}
+
+		$generic = array('ok' => false, 'message' => 'Returns can be registered only for an order verified in this chat: ask for the order number and the phone number of the order and call find_order first (logged-in customers: my_orders). Say nothing about whether such an order exists.');
+
+		if (!$this->orders) {
+			return $generic;
+		}
+
+		$order = $this->orders->visibleOrder(isset($input['order_id']) && is_scalar($input['order_id']) ? (string)$input['order_id'] : '');
+
+		if (!$order) {
+			return $generic;
+		}
+
+		$wanted = isset($input['product']) && is_string($input['product']) ? trim($input['product']) : '';
+		$lower = function ($s) {
+			return function_exists('mb_strtolower') ? mb_strtolower((string)$s, 'UTF-8') : strtolower((string)$s);
+		};
+		$products = $this->orders->orderProducts($order);
+		$match = null;
+
+		foreach ($products as $p) {
+			if ($wanted !== '' && (strpos($lower($p['name']), $lower($wanted)) !== false || strpos($lower($wanted), $lower($p['name'])) !== false || ($p['model'] !== '' && strpos($lower($wanted), $lower($p['model'])) !== false))) {
+				$match = $p;
+				break;
+			}
+		}
+
+		if (!$match && count($products) === 1) {
+			$match = $products[0];
+		}
+
+		if (!$match) {
+			$names = array();
+			foreach ($products as $p) {
+				$names[] = $p['name'];
+			}
+			return array('ok' => false, 'message' => 'Which product of the order? Ask the customer to choose one of: ' . implode('; ', $names));
+		}
+
+		$reasons = array('damaged', 'wrong_item', 'defective', 'not_as_described', 'changed_mind', 'other');
+		$reason = isset($input['reason']) && in_array($input['reason'], $reasons, true) ? $input['reason'] : 'other';
+		$details = isset($input['details']) && is_string($input['details']) ? $this->cut(trim($input['details']), 2000) : '';
+		$uploads = new Uploads($this->registry);
+		$imageIds = $uploads->filterOwned(isset($input['image_ids']) && is_array($input['image_ids']) ? $input['image_ids'] : array(), (int)$this->conversation['conversation_id'], 6);
+		$files = array();
+
+		foreach ($imageIds as $imageId) {
+			$row = $uploads->get($imageId, (int)$this->conversation['conversation_id']);
+			$file = $row ? Uploads::path($row) : '';
+			if ($file !== '') {
+				$files[] = $file;
+			}
+		}
+
+		$requests = $this->requests();
+		$id = $requests->add(array(
+			'store_id'        => $this->storeId,
+			'conversation_id' => (int)$this->conversation['conversation_id'],
+			'type'            => 'return',
+			'order_id'        => (int)$order['order_id'],
+			'product_id'      => $match['product_id'],
+			'email'           => (string)$order['email'],
+			'phone'           => (string)$order['telephone'],
+			'data'            => array('product' => $match['name'], 'model' => $match['model'], 'order_product_id' => $match['order_product_id'], 'reason' => $reason, 'details' => $details, 'images' => $imageIds),
+		));
+
+		$requests->mailStore($this->storeId, $this->testPrefix() . 'AI Chat: return request #' . $id . ' – order #' . (int)$order['order_id'],
+			"Return / complaint registered in the chat (order verified in the chat).\n\n"
+			. "Order: #" . (int)$order['order_id'] . " (" . $this->text($order['firstname'] . ' ' . $order['lastname']) . ", " . $order['email'] . ", " . $order['telephone'] . ")\n"
+			. "Product: " . $match['name'] . ($match['model'] !== '' ? ' (' . $match['model'] . ')' : '') . " x" . $match['quantity'] . "\n"
+			. "Reason: " . $reason . "\n"
+			. "Details: " . $details . "\n"
+			. "Photos: " . count($files) . " attached\n"
+			. "Chat: #" . (int)$this->conversation['conversation_id'] . "\n", (string)$order['email'], $files);
+
+		return array('ok' => true, 'request_id' => $id, 'message' => 'The return request was registered and sent to the team; they will contact the customer by e-mail or phone. Do not promise refunds, deadlines or the outcome.');
+	}
+
+	public function leaveContact(array $input) {
+		$gate = $this->requestGate();
+
+		if ($gate) {
+			return $gate;
+		}
+
+		$email = Requests::validEmail(isset($input['email']) && is_scalar($input['email']) ? $input['email'] : '');
+		$phone = Requests::validPhone(isset($input['phone']) && is_scalar($input['phone']) ? $input['phone'] : '');
+		$note = isset($input['note']) && is_string($input['note']) ? $this->cut(trim($input['note']), 1000) : '';
+
+		if ($email === '' && $phone === '') {
+			return array('ok' => false, 'message' => 'A valid e-mail address or phone number is needed; ask the customer for one (or to check it).');
+		}
+
+		$cid = (int)$this->conversation['conversation_id'];
+		$requests = $this->requests();
+		$id = $requests->add(array('store_id' => $this->storeId, 'conversation_id' => $cid, 'type' => 'contact', 'email' => $email, 'phone' => $phone, 'data' => array('note' => $note, 'page' => $this->conversation['last_url'])));
+
+		$requests->mailStore($this->storeId, $this->testPrefix() . 'AI Chat: please contact the customer – chat #' . $cid,
+			"A visitor left a contact in the chat. Please get back to them.\n"
+			. "Клиент остави контакт в чата. Моля, свържете се с него.\n\n"
+			. "E-mail: " . ($email !== '' ? $email : '-') . "\n"
+			. "Phone: " . ($phone !== '' ? $phone : '-') . "\n"
+			. "Note: " . ($note !== '' ? $note : '-') . "\n"
+			. "Page: " . $this->conversation['last_url'] . "\n\n"
+			. "--- Conversation #" . $cid . " ---\n" . Handover::transcript($this->db, $cid, 200) . "\n", $email);
+
+		return array('ok' => true, 'request_id' => $id, 'message' => 'The contact and the conversation were sent to the team; they will get back to the customer. Confirm this briefly; do not promise a time.');
+	}
+
+	private function testPrefix() {
+		return $this->conversation && !empty($this->conversation['is_test']) ? '[TEST] ' : '';
+	}
+
+	private function cut($text, $max) {
+		return self::len($text) > $max ? self::sub($text, 0, $max) : $text;
 	}
 
 	// ================================================================ text helpers

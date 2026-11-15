@@ -7,9 +7,9 @@ namespace Aichat;
  */
 class Installer {
 	const EVENT_CODE = 'aichat';
-	const VERSION = '1.1.0';
+	const VERSION = '1.2.0';
 	/** Bump when a step is added to migrate(). */
-	const SCHEMA = 2;
+	const SCHEMA = 3;
 
 	/** Event list: trigger => action (all under code EVENT_CODE). */
 	public static function events() {
@@ -26,6 +26,7 @@ class Installer {
 
 		$settings = new Settings($registry);
 		$settings->ensureSecret();
+		$settings->telegramSecret();
 
 		// Defaults for the global keys that are not set yet (never overwrite)
 		$missing = array();
@@ -66,6 +67,20 @@ class Installer {
 		// 2: Turnstile verification remembered per conversation (0 no, 1 verified, 2 Turnstile was down)
 		self::addColumn($db, 'aichat_conversation', 'human_verified', "TINYINT(1) NOT NULL DEFAULT '0' AFTER `order_attempts`");
 		self::addIndex($db, 'aichat_conversation', 'date_modified', '`date_modified`');
+
+		// 3: handover, test chats, ratings (new tables are created by createTables())
+		self::addColumn($db, 'aichat_conversation', 'tg_chat_id', "VARCHAR(32) NOT NULL DEFAULT '' AFTER `note`");
+		self::addColumn($db, 'aichat_conversation', 'tg_topic_id', "INT(11) NOT NULL DEFAULT '0' AFTER `tg_chat_id`");
+		self::addColumn($db, 'aichat_conversation', 'staff_name', "VARCHAR(64) NOT NULL DEFAULT '' AFTER `tg_topic_id`");
+		self::addColumn($db, 'aichat_conversation', 'waiting_since', "DATETIME NULL DEFAULT NULL AFTER `staff_name`");
+		self::addColumn($db, 'aichat_conversation', 'is_test', "TINYINT(1) NOT NULL DEFAULT '0' AFTER `waiting_since`");
+		self::addIndex($db, 'aichat_conversation', 'tg_topic', '`tg_chat_id`, `tg_topic_id`');
+		self::addColumn($db, 'aichat_message', 'rating', "TINYINT(1) NOT NULL DEFAULT '0' AFTER `cost`");
+	}
+
+	/** Tables of the module (uninstall drops them). */
+	public static function tables() {
+		return array('aichat_conversation', 'aichat_message', 'aichat_usage', 'aichat_rate', 'aichat_upload', 'aichat_kb', 'aichat_request', 'aichat_search_miss', 'aichat_preview');
 	}
 
 	public static function addColumn($db, $table, $column, $definition) {
@@ -107,14 +122,15 @@ class Installer {
 
 		if ($dropData) {
 			$db = $registry->get('db');
-			foreach (array('aichat_conversation', 'aichat_message', 'aichat_usage', 'aichat_rate') as $table) {
+			foreach (self::tables() as $table) {
 				$db->query("DROP TABLE IF EXISTS `" . DB_PREFIX . $table . "`");
 			}
+			Uploads::deleteAllFiles();
 
 			$settings = new Settings($registry);
 			$settings->deleteAll();
 			$settings->setApiKey('');
-			foreach ((array)glob(dirname(Settings::keyFile()) . '/courier_*.php') as $file) {
+			foreach (array_merge((array)glob(dirname(Settings::keyFile()) . '/courier_*.php'), (array)glob(dirname(Settings::keyFile()) . '/secret_*.php')) as $file) {
 				@unlink($file);
 			}
 		}
@@ -174,9 +190,15 @@ class Installer {
 			`cost` DECIMAL(14,6) NOT NULL DEFAULT '0.000000',
 			`flagged` TINYINT(1) NOT NULL DEFAULT '0',
 			`note` TEXT NULL,
+			`tg_chat_id` VARCHAR(32) NOT NULL DEFAULT '',
+			`tg_topic_id` INT(11) NOT NULL DEFAULT '0',
+			`staff_name` VARCHAR(64) NOT NULL DEFAULT '',
+			`waiting_since` DATETIME NULL DEFAULT NULL,
+			`is_test` TINYINT(1) NOT NULL DEFAULT '0',
 			`date_added` DATETIME NOT NULL,
 			`date_modified` DATETIME NOT NULL,
 			PRIMARY KEY (`conversation_id`),
+			KEY `tg_topic` (`tg_chat_id`, `tg_topic_id`),
 			UNIQUE KEY `public_id` (`public_id`),
 			KEY `store_date` (`store_id`, `date_added`),
 			KEY `customer_id` (`customer_id`),
@@ -193,6 +215,7 @@ class Installer {
 			`input_tokens` INT(11) NOT NULL DEFAULT '0',
 			`output_tokens` INT(11) NOT NULL DEFAULT '0',
 			`cost` DECIMAL(14,6) NOT NULL DEFAULT '0.000000',
+			`rating` TINYINT(1) NOT NULL DEFAULT '0',
 			`date_added` DATETIME NOT NULL,
 			PRIMARY KEY (`message_id`),
 			KEY `conversation_id` (`conversation_id`, `message_id`),
@@ -217,6 +240,70 @@ class Installer {
 			`hits` INT(11) NOT NULL DEFAULT '0',
 			PRIMARY KEY (`rate_key`),
 			KEY `window_start` (`window_start`)
+		) " . $charset);
+
+		$db->query("CREATE TABLE IF NOT EXISTS `" . DB_PREFIX . "aichat_upload` (
+			`upload_id` INT(11) NOT NULL AUTO_INCREMENT,
+			`conversation_id` INT(11) NOT NULL,
+			`file` VARCHAR(64) NOT NULL,
+			`mime` VARCHAR(32) NOT NULL DEFAULT 'image/jpeg',
+			`bytes` INT(11) NOT NULL DEFAULT '0',
+			`date_added` DATETIME NOT NULL,
+			PRIMARY KEY (`upload_id`),
+			KEY `conversation_id` (`conversation_id`),
+			KEY `date_added` (`date_added`)
+		) " . $charset);
+
+		$db->query("CREATE TABLE IF NOT EXISTS `" . DB_PREFIX . "aichat_kb` (
+			`kb_id` INT(11) NOT NULL AUTO_INCREMENT,
+			`store_id` INT(11) NOT NULL DEFAULT '-1',
+			`language_id` INT(11) NOT NULL DEFAULT '0',
+			`question` TEXT NOT NULL,
+			`answer` TEXT NOT NULL,
+			`status` TINYINT(1) NOT NULL DEFAULT '1',
+			`source_message_id` INT(11) NOT NULL DEFAULT '0',
+			`date_added` DATETIME NOT NULL,
+			PRIMARY KEY (`kb_id`),
+			KEY `store_lang` (`store_id`, `language_id`, `status`)
+		) " . $charset);
+
+		$db->query("CREATE TABLE IF NOT EXISTS `" . DB_PREFIX . "aichat_request` (
+			`request_id` INT(11) NOT NULL AUTO_INCREMENT,
+			`store_id` INT(11) NOT NULL DEFAULT '0',
+			`conversation_id` INT(11) NOT NULL DEFAULT '0',
+			`type` VARCHAR(16) NOT NULL,
+			`order_id` INT(11) NOT NULL DEFAULT '0',
+			`product_id` INT(11) NOT NULL DEFAULT '0',
+			`email` VARCHAR(96) NOT NULL DEFAULT '',
+			`phone` VARCHAR(32) NOT NULL DEFAULT '',
+			`data` MEDIUMTEXT NULL,
+			`status` VARCHAR(8) NOT NULL DEFAULT 'new',
+			`date_added` DATETIME NOT NULL,
+			PRIMARY KEY (`request_id`),
+			KEY `store_status` (`store_id`, `status`, `date_added`),
+			KEY `conversation_id` (`conversation_id`)
+		) " . $charset);
+
+		$db->query("CREATE TABLE IF NOT EXISTS `" . DB_PREFIX . "aichat_search_miss` (
+			`miss_id` INT(11) NOT NULL AUTO_INCREMENT,
+			`store_id` INT(11) NOT NULL DEFAULT '0',
+			`language_id` INT(11) NOT NULL DEFAULT '0',
+			`query` VARCHAR(191) NOT NULL,
+			`hits` INT(11) NOT NULL DEFAULT '1',
+			`date_modified` DATETIME NOT NULL,
+			PRIMARY KEY (`miss_id`),
+			UNIQUE KEY `store_lang_query` (`store_id`, `language_id`, `query`),
+			KEY `date_modified` (`date_modified`)
+		) " . $charset);
+
+		$db->query("CREATE TABLE IF NOT EXISTS `" . DB_PREFIX . "aichat_preview` (
+			`preview_id` INT(11) NOT NULL AUTO_INCREMENT,
+			`store_id` INT(11) NOT NULL DEFAULT '0',
+			`url` VARCHAR(1000) NOT NULL DEFAULT '',
+			`data` MEDIUMTEXT NULL,
+			`date_added` DATETIME NOT NULL,
+			PRIMARY KEY (`preview_id`),
+			KEY `date_added` (`date_added`)
 		) " . $charset);
 	}
 
