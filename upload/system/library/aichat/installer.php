@@ -89,16 +89,10 @@ class Installer {
 
 	private static function eventsPresent($registry) {
 		$db = $registry->get('db');
-		$query = $db->query("SELECT `trigger`, `action` FROM `" . DB_PREFIX . "event` WHERE `code` = '" . self::EVENT_CODE . "'");
-		$have = array();
-
-		foreach ($query->rows as $row) {
-			$have[$row['trigger'] . '|' . $row['action']] = true;
-		}
-
 		foreach (self::events() as $trigger => $action) {
-			if (!isset($have[$trigger . '|' . $action])) {
-				return false;
+			$n = (int)$db->query("SELECT COUNT(*) AS n FROM `" . DB_PREFIX . "event` WHERE `trigger` = '" . $db->escape($trigger) . "' AND `action` = '" . $db->escape($action) . "'")->row['n'];
+			if ($n !== 1) {
+				return false; // missing or duplicated
 			}
 		}
 
@@ -128,31 +122,32 @@ class Installer {
 		return true;
 	}
 
+	/**
+	 * (Re)registers our events. Rows with the same trigger + action under any
+	 * code (e.g. "aichat_menu" added by the admin controller) are removed
+	 * first, so there is never a duplicate.
+	 */
 	public static function registerEvents($registry) {
+		self::unregisterEvents($registry);
 		$model = self::eventModel($registry);
+		$db = $registry->get('db');
 
-		if ($model) {
-			$model->deleteEventByCode(self::EVENT_CODE);
-			foreach (self::events() as $trigger => $action) {
+		foreach (self::events() as $trigger => $action) {
+			if ($model) {
 				$model->addEvent(self::EVENT_CODE, $trigger, $action);
-			}
-		} else {
-			// Fallback without the admin model (e.g. CLI / catalog context)
-			$db = $registry->get('db');
-			$db->query("DELETE FROM `" . DB_PREFIX . "event` WHERE `code` = '" . self::EVENT_CODE . "'");
-			foreach (self::events() as $trigger => $action) {
+			} else {
+				// Fallback without the admin model (e.g. CLI / catalog context)
 				$db->query("INSERT INTO `" . DB_PREFIX . "event` SET `code` = '" . self::EVENT_CODE . "', `trigger` = '" . $db->escape($trigger) . "', `action` = '" . $db->escape($action) . "', `status` = '1', `sort_order` = '0'");
 			}
 		}
 	}
 
 	public static function unregisterEvents($registry) {
-		$model = self::eventModel($registry);
+		$db = $registry->get('db');
+		$db->query("DELETE FROM `" . DB_PREFIX . "event` WHERE `code` = '" . self::EVENT_CODE . "'");
 
-		if ($model) {
-			$model->deleteEventByCode(self::EVENT_CODE);
-		} else {
-			$registry->get('db')->query("DELETE FROM `" . DB_PREFIX . "event` WHERE `code` = '" . self::EVENT_CODE . "'");
+		foreach (self::events() as $trigger => $action) {
+			$db->query("DELETE FROM `" . DB_PREFIX . "event` WHERE `trigger` = '" . $db->escape($trigger) . "' AND `action` = '" . $db->escape($action) . "'");
 		}
 	}
 

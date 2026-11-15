@@ -145,6 +145,34 @@ function ids($result) {
 	return $ids;
 }
 
+// ---------------------------------------------------------------- baseline settings
+// Seeded here (not through the admin form) so the storefront tests do not depend on the admin UI.
+if (getenv('SMOKE_DB') && getenv('SMOKE_OC')) {
+	$keyDir = getenv('SMOKE_OC') . '/system/storage/aichat';
+	@mkdir($keyDir, 0700, true);
+	if (!is_file($keyDir . '/key.php')) {
+		file_put_contents($keyDir . '/key.php', "<?php\nreturn 'sk-test-fake-key';\n");
+	}
+	foreach (array('g_model' => 'claude-sonnet-5-5', 'g_instructions' => 'Global rule', 'g_price_in' => 2, 'g_price_out' => 10, 'g_budget_month' => 50) as $k => $v) {
+		setting(0, $k, $v);
+	}
+	foreach (array(0, 1) as $sid) {
+		$hours = array();
+		foreach (array('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun') as $d) {
+			$hours[$d] = in_array($d, array('sat', 'sun'), true) ? array('from' => '', 'to' => '') : array('from' => '09:00', 'to' => '1' . (7 + $sid) . ':00');
+		}
+		$store = array(
+			's_status' => 1, 's_bot_name' => 'Bot' . $sid, 's_avatar' => 'default', 's_greeting' => array('1' => 'Hi from store ' . $sid),
+			's_instructions' => 'Store ' . $sid . ' rule', 's_contacts' => array('phone' => '+359 88 000 00' . $sid, 'email' => 'shop' . $sid . '@example.com', 'viber' => '', 'whatsapp' => '', 'note' => ''),
+			's_work_hours' => $hours, 's_emoji' => $sid, 's_order_link_button' => 0, 's_budget_month' => $sid + 5, 's_max_chats_day' => 0,
+			's_max_msgs_chat' => 40, 's_max_msgs_minute' => 6, 's_max_len' => 1000,
+		);
+		foreach ($store as $k => $v) {
+			setting($sid, $k, $v);
+		}
+	}
+}
+
 // ---------------------------------------------------------------- boot
 $b0 = boot($store0);
 $b1 = boot($store1);

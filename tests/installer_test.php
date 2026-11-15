@@ -64,6 +64,11 @@ $secret2 = $db->query("SELECT `value` FROM `" . DB_PREFIX . "setting` WHERE `key
 check('HMAC secret kept', $secret && $secret['value'] === $secret2['value']);
 check('second upgrade is a no-op', \Aichat\Installer::upgrade($registry) === false && count(events($db)) === 2);
 check('install() again is idempotent', \Aichat\Installer::install($registry) === true && count(events($db)) === 2);
+// admin controller's own menu row (code aichat_menu) must not end up duplicated
+$db->query("INSERT INTO `" . DB_PREFIX . "event` SET `code` = 'aichat_menu', `trigger` = 'admin/view/common/column_left/before', `action` = 'extension/module/aichat/menu', `status` = '1', `sort_order` = '0'");
+\Aichat\Installer::upgrade($registry);
+$n = $db->query("SELECT COUNT(*) AS n FROM `" . DB_PREFIX . "event` WHERE `action` = 'extension/module/aichat/menu'")->row['n'];
+check('menu event never duplicated (admin aichat_menu row)', (int)$n === 1);
 
 // courier secret file: write-only storage
 $settings->setCourierSecret('selftest', array('username' => 'u', 'password' => 'p'));
