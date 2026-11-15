@@ -43,6 +43,12 @@ class ControllerExtensionModuleAichat extends Controller {
 			$publicId = false;
 		}
 
+		// Resume window: older conversations start fresh
+		if ($conversation && !$this->resumable($conversation, $store)) {
+			$conversation = null;
+			$publicId = false;
+		}
+
 		if (!$publicId) {
 			// The conversation row is created lazily on the first message
 			$publicId = \Aichat\Guard::newPublicId();
@@ -61,19 +67,27 @@ class ControllerExtensionModuleAichat extends Controller {
 					$item['products'] = $this->flatten($groups);
 					$item['product_groups'] = $groups;
 				}
+				if (!empty($message['meta']['cards']) && is_array($message['meta']['cards'])) {
+					$item['cards'] = array_values($message['meta']['cards']);
+				}
+				if ($item['content'] === '' && empty($item['products']) && empty($item['cards'])) {
+					continue;
+				}
 				$history[] = $item;
 			}
 		}
 
-		$greeting = '';
-		if (is_array($store['s_greeting']) && !empty($store['s_greeting'][$languageId])) {
-			$greeting = trim(html_entity_decode($store['s_greeting'][$languageId], ENT_QUOTES, 'UTF-8'));
-		}
+		$greeting = $this->byLanguage($store['s_greeting'], $languageId);
 		if ($greeting === '') {
 			$greeting = sprintf($this->language->get('widget_greeting'), $botName);
 		}
 
-		$turnstile = trim((string)$settings->getGlobal('g_turnstile_site'));
+		$welcomeBack = $this->byLanguage($store['s_welcome_back'], $languageId);
+		if ($welcomeBack === '') {
+			$welcomeBack = $this->language->get('widget_welcome_back');
+		}
+
+		$turnstile = $guard->turnstileEnabled() ? trim((string)$settings->getGlobal('g_turnstile_site')) : '';
 
 		$this->json(array(
 			'enabled'        => true,
@@ -84,10 +98,107 @@ class ControllerExtensionModuleAichat extends Controller {
 			'strings'        => $this->strings($botName),
 			'token'          => $guard->makeToken($publicId, $storeId),
 			'history'        => $history,
-			'mode'           => $conversation ? $conversation['mode'] : 'bot',
+			'mode'           => $conversation ? ($conversation['mode'] === 'closed' ? 'bot' : $conversation['mode']) : 'bot',
 			'turnstile_site' => $turnstile !== '' ? $turnstile : null,
 			'max_len'        => (int)$store['s_max_len'],
+			'returning'      => (bool)$history,
+			'welcome_back'   => $welcomeBack,
+			'quick_replies'  => $this->quickReplies($store, $languageId),
+			'logged_in'      => (bool)$this->customer->isLogged(),
+			'appearance'     => $this->appearance($store, $languageId, $botName),
 		));
+	}
+
+	/** Conversation still inside the resume window (s_resume_days, 0 = always resume). */
+	private function resumable(array $conversation, array $store) {
+		$days = (int)$store['s_resume_days'];
+
+		if ($days <= 0) {
+			return true;
+		}
+
+		$last = strtotime($conversation['date_modified']);
+
+		return $last && $last >= time() - $days * 86400;
+	}
+
+	/** Value of a per-language setting (array by language_id) as plain text. */
+	private function byLanguage($value, $languageId) {
+		if (is_array($value) && isset($value[$languageId]) && is_string($value[$languageId])) {
+			return trim(html_entity_decode($value[$languageId], ENT_QUOTES, 'UTF-8'));
+		}
+
+		return '';
+	}
+
+	private function quickReplies(array $store, $languageId) {
+		$raw = isset($store['s_quick_replies'][$languageId]) ? $store['s_quick_replies'][$languageId] : '';
+		$lines = is_array($raw) ? $raw : preg_split('/\r\n|\r|\n/', html_entity_decode((string)$raw, ENT_QUOTES, 'UTF-8'));
+		$out = array();
+
+		foreach ($lines as $line) {
+			$line = trim((string)$line);
+			if ($line !== '' && \Aichat\Tools::len($line) <= 80 && !in_array($line, $out, true)) {
+				$out[] = $line;
+			}
+			if (count($out) >= 6) {
+				break;
+			}
+		}
+
+		return $out;
+	}
+
+	/** boot.appearance from the per-store settings (validated, defaults filled in). */
+	private function appearance(array $store, $languageId, $botName) {
+		$defaults = \Aichat\Settings::storeDefaults();
+		$color = function ($key) use ($store, $defaults) {
+			$value = trim((string)$store[$key]);
+			return preg_match('/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i', $value) ? strtolower($value) : $defaults[$key];
+		};
+		$pick = function ($value, array $allowed) {
+			return in_array($value, $allowed, true) ? $value : $allowed[0];
+		};
+		$int = function ($value, $min, $max, $default) {
+			return is_numeric($value) && (int)$value >= $min && (int)$value <= $max ? (int)$value : $default;
+		};
+
+		$style = $pick((string)$store['s_launcher_style'], array('avatar', 'avatar_text'));
+		$size = $int($store['s_launcher_size'], 32, 120, 56);
+		$avatarSize = (int)$store['s_launcher_avatar_size'] > 0 ? $int($store['s_launcher_avatar_size'], 16, 120, 45) : ($style === 'avatar_text' ? 36 : 45);
+		$text = $this->byLanguage($store['s_launcher_text'], $languageId);
+
+		$css = html_entity_decode((string)$store['s_custom_css'], ENT_QUOTES, 'UTF-8');
+		$css = str_ireplace(array('</style', '<script', '</script'), '', $css);
+
+		return array(
+			'accent'      => $color('s_color_accent'),
+			'header_bg'   => $color('s_color_header_bg'),
+			'header_text' => $color('s_color_header_text'),
+			'user_bg'     => $color('s_color_user_bg'),
+			'user_text'   => $color('s_color_user_text'),
+			'launcher'    => array(
+				'style'       => $style,
+				'text'        => $text !== '' ? $text : $botName,
+				'shape'       => $pick((string)$store['s_launcher_shape'], array('circle', 'rounded', 'pill')),
+				'size'        => $size,
+				'avatar_size' => $avatarSize,
+			),
+			'position'    => array(
+				'desktop' => array(
+					'side' => $pick((string)$store['s_pos_desktop_side'], array('right', 'left')),
+					'x'    => $int($store['s_pos_desktop_x'], 0, 2000, 20),
+					'y'    => $int($store['s_pos_desktop_y'], 0, 2000, 20),
+				),
+				'mobile'  => array(
+					'side' => $pick((string)$store['s_pos_mobile_side'], array('right', 'left')),
+					'x'    => $int($store['s_pos_mobile_x'], 0, 2000, 20),
+					'y'    => $int($store['s_pos_mobile_y'], 0, 2000, 20),
+				),
+			),
+			'z_index'     => $int($store['s_zindex'], 1, 2147483647, 2147483000),
+			'custom_css'  => $css,
+		);
 	}
 
 	// ================================================================ send
@@ -148,17 +259,40 @@ class ControllerExtensionModuleAichat extends Controller {
 			return;
 		}
 
-		// --- stage 2 hook: Cloudflare Turnstile
-		$human = $this->verifyHuman($conversation, isset($input['turnstile']) ? (string)$input['turnstile'] : '', $settings);
+		// --- stage 2: Cloudflare Turnstile, once per conversation (challenge, never a hard block)
+		$ip = $guard->clientIp($this->request->server);
+		$verifiedState = $conversation ? (int)$conversation['human_verified'] : 0;
+		$newVerified = 0;
+		$turnstileToken = isset($input['turnstile']) && is_string($input['turnstile']) ? trim($input['turnstile']) : '';
 
-		if ($human !== true) {
-			$this->fail('turnstile');
-			return;
+		if ($guard->turnstileEnabled() && $verifiedState === 0) {
+			if ($turnstileToken === '') {
+				$this->fail('challenge');
+				return;
+			}
+
+			if ($turnstileToken === 'unavailable') {
+				// the visitor's browser could not run Turnstile: rate limits only, a tighter per-IP budget
+				if (!$guard->hitUnavailable($ip)) {
+					$this->fail('rate_limited');
+					return;
+				}
+			} else {
+				$check = $guard->verifyTurnstile($turnstileToken, $ip);
+
+				if ($check === 'fail') {
+					$this->fail('challenge');
+					return;
+				}
+
+				// 'outage': remembered as 2 = not challenged again, but no per-IP exemption
+				$newVerified = $check === 'ok' ? 1 : 2;
+				$verifiedState = $newVerified;
+			}
 		}
 
-		// --- rate limits (per conversation, per IP, per chat, new chats per day)
-		$ip = isset($this->request->server['REMOTE_ADDR']) ? (string)$this->request->server['REMOTE_ADDR'] : '';
-		$limit = $guard->checkMessage($store, $conversation, $publicId, $ip);
+		// --- rate limits (per conversation, per IP, per chat, daily chat cap)
+		$limit = $guard->checkMessage($store, $conversation, $publicId, $ip, $verifiedState === 1, $storeId);
 
 		if ($limit !== '') {
 			$this->fail($limit, $this->contactsLine($store));
@@ -183,12 +317,18 @@ class ControllerExtensionModuleAichat extends Controller {
 				'url'         => $url,
 			));
 			$guard->countChat($storeId);
-			$conversation = $model->getConversation($publicId, $storeId);
 		} else {
 			$conversationId = (int)$conversation['conversation_id'];
 		}
 
+		if ($newVerified) {
+			$model->setHumanVerified($conversationId, $newVerified);
+		}
+
+		$conversation = $model->getConversation($publicId, $storeId);
+
 		$tools = new \Aichat\Tools($this->registry, $storeId, $languageId);
+		$tools->setContext($settings, $conversation, $ip);
 		$pageContext = new \Aichat\PageContext($this->registry, $tools);
 		$page = $pageContext->resolve($url);
 
@@ -205,7 +345,7 @@ class ControllerExtensionModuleAichat extends Controller {
 		}
 
 		if ($mode !== 'bot') {
-			$this->finish(array('reply' => '', 'products' => array(), 'product_groups' => array(), 'mode' => $mode, 'message_id' => 0));
+			$this->finish(array('reply' => '', 'products' => array(), 'product_groups' => array(), 'cards' => array(), 'mode' => $mode, 'message_id' => 0));
 			return;
 		}
 
@@ -218,16 +358,22 @@ class ControllerExtensionModuleAichat extends Controller {
 		// --- prompt + conversation
 		$botName = $this->botName($store);
 		$prompt = new \Aichat\Prompt($this->registry, $settings, $tools);
-		$system = $prompt->system($store, $botName, $this->languageName($languageId), $page, $this->customer->isLogged() ? (string)$this->customer->getFirstName() : '');
+		$system = $prompt->system($store, $botName, $this->languageName($languageId), $page, $this->customer->isLogged() ? (string)$this->customer->getFirstName() : '', (int)$conversation['verified_order_id'], $this->customer->isLogged());
 		$messages = $this->modelMessages($history, $message);
 
 		$client = new \Aichat\Client($settings->getApiKey(), $settings->getGlobal('g_model'));
 		$filter = new \Aichat\LinkFilter(\Aichat\PageContext::storeHosts($this->config));
 
+		// courier tracking links of the order verified in this conversation
+		foreach ($tools->orders()->verifiedUrls() as $trackingUrl) {
+			$filter->allowUrl($trackingUrl);
+		}
+
 		$self = $this;
 		$streaming = $this->streaming;
 		$reply = '';
 		$groups = array();
+		$linkCards = array();
 		$totals = array('in' => 0, 'out' => 0, 'cost' => 0.0);
 
 		$hooks = array(
@@ -247,14 +393,28 @@ class ControllerExtensionModuleAichat extends Controller {
 					$self->sse('delta', array('text' => $safe));
 				}
 			},
-			'tool' => function ($name, $toolInput) use ($tools) {
-				return $tools->execute($name, $toolInput);
+			'tool' => function ($name, $toolInput) use ($tools, $filter) {
+				$out = $tools->execute($name, $toolInput);
+				// tracking links of an order verified just now may appear in the reply
+				foreach ($tools->orders()->allowedUrls() as $trackingUrl) {
+					$filter->allowUrl($trackingUrl);
+				}
+				return $out;
 			},
-			'round_done' => function () use ($self, $tools, $streaming, &$groups) {
+			'round_done' => function () use ($self, $tools, $streaming, &$groups, &$linkCards) {
 				foreach ($tools->takeCards() as $group) {
 					$groups[] = $group;
 					if ($streaming) {
-						$self->sse('products', $group);
+						$self->sse('products', $self->productsEvent($group));
+					}
+				}
+				$cards = $tools->takeLinkCards();
+				if ($cards) {
+					foreach ($cards as $card) {
+						$linkCards[] = $card;
+					}
+					if ($streaming) {
+						$self->sse('cards', array('items' => $cards));
 					}
 				}
 			},
@@ -289,13 +449,21 @@ class ControllerExtensionModuleAichat extends Controller {
 			'products'    => $this->groupsMeta($groups),
 		);
 
+		if ($linkCards) {
+			$meta['cards'] = $linkCards;
+		}
+
 		if ($result['error']) {
 			$meta['error'] = $result['error'];
 		}
 
 		$messageId = 0;
 
-		if ($reply !== '' || $groups || $totals['in'] || $totals['out']) {
+		if ($totals['cost'] > 0) {
+			$guard->budgetWarnings($this->registry, $storeId);
+		}
+
+		if ($reply !== '' || $groups || $linkCards || $totals['in'] || $totals['out']) {
 			$messageId = $model->addMessage($conversationId, 'assistant', $reply, $meta, $totals['in'], $totals['out'], $totals['cost']);
 			$model->bumpMessageCount($conversationId);
 		}
@@ -318,18 +486,28 @@ class ControllerExtensionModuleAichat extends Controller {
 			'reply'          => $reply,
 			'products'       => $this->flatten($groups),
 			'product_groups' => $groups,
+			'cards'          => $linkCards,
 			'mode'           => 'bot',
 			'message_id'     => $messageId,
 		));
 	}
 
-	/**
-	 * Stage 2: verify Cloudflare Turnstile here (g_turnstile_secret, siteverify),
-	 * e.g. once per conversation or after suspicious activity. Return true to
-	 * allow, anything else to reject with error code `turnstile`.
-	 */
-	protected function verifyHuman($conversation, $turnstileToken, $settings) {
-		return true;
+	/** Public only for the closures. `products` event: {label, items}; suggestion items carry label too. */
+	public function productsEvent($group = array()) {
+		if (!is_array($group) || !isset($group['items'])) {
+			return array('items' => array());
+		}
+
+		$items = array();
+
+		foreach ($group['items'] as $card) {
+			if ($group['label'] === 'suggestion') {
+				$card['label'] = 'suggestion';
+			}
+			$items[] = $card;
+		}
+
+		return array('label' => $group['label'], 'items' => $items);
 	}
 
 	// ================================================================ footer event
@@ -480,6 +658,18 @@ class ControllerExtensionModuleAichat extends Controller {
 				}
 			}
 
+			if ($role === 'assistant' && !empty($row['meta']['cards']) && is_array($row['meta']['cards'])) {
+				$titles = array();
+				foreach ($row['meta']['cards'] as $card) {
+					if (isset($card['type'], $card['title'])) {
+						$titles[] = $card['type'] . ': ' . $card['title'];
+					}
+				}
+				if ($titles) {
+					$text .= ($text !== '' ? "\n" : '') . '[Link cards shown: ' . implode('; ', $titles) . ']';
+				}
+			}
+
 			if ($text === '') {
 				continue;
 			}
@@ -565,6 +755,9 @@ class ControllerExtensionModuleAichat extends Controller {
 			foreach ($groups as $group) {
 				if ($group['label'] === $label) {
 					foreach ($group['items'] as $card) {
+						if ($label === 'suggestion') {
+							$card['label'] = 'suggestion';
+						}
 						$items[] = $card;
 					}
 				}

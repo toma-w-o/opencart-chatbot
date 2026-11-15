@@ -10,6 +10,8 @@
  *   2. after search result     -> short text + tool_use show_products(first two ids found)
  *   3. after show_products     -> final text with an own-host link and foreign links,
  *                                 streamed in tiny chunks (tests the link filter across chunks)
+ * Tool probe: visitor text "[SAY[text]] tool:<name> <json input>" calls that tool, then answers
+ * "<text>\nRESULT: <tool result>" (SAY text first, so links in it go through the filter).
  * Validates what the real API would reject (headers, alternating roles, tool_result ids,
  * thinking blocks replayed unchanged, empty tool input as {}), answering 400 like the API.
  * Every request body is appended to FAKE_LOG (env) or the system temp dir.
@@ -118,11 +120,13 @@ $id = 'msg_' . substr(md5(uniqid('', true)), 0, 12);
 
 // Direct tool probe: visitor text "tool:<name> <json input>" -> call it, then echo the result
 if (preg_match('/tool:(\w+) (\{.*\})\s*$/s', $visitor, $probe)) {
+	$say = preg_match('/^SAY\[(.*?)\]\s/s', $visitor, $sm) ? $sm[1] . "\n" : '';
 	if ($lastToolResult === null) {
-		$content = array(array('type' => 'tool_use', 'id' => 'toolu_' . substr(md5($id), 0, 10), 'name' => $probe[1], 'input' => json_decode($probe[2], true)));
+		$input = json_decode($probe[2], true);
+		$content = array(array('type' => 'tool_use', 'id' => 'toolu_' . substr(md5($id), 0, 10), 'name' => $probe[1], 'input' => $input ? $input : new stdClass()));
 		$stop = 'tool_use';
 	} else {
-		$content = array(array('type' => 'text', 'text' => 'RESULT' . (!empty($lastToolResult['is_error']) ? '(error)' : '') . ': ' . $lastToolResult['content']));
+		$content = array(array('type' => 'text', 'text' => $say . 'RESULT' . (!empty($lastToolResult['is_error']) ? '(error)' : '') . ': ' . $lastToolResult['content']));
 		$stop = 'end_turn';
 	}
 } elseif ($lastToolResult === null) {

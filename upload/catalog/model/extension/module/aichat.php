@@ -48,6 +48,11 @@ class ModelExtensionModuleAichat extends Model {
 		}
 	}
 
+	/** Turnstile result remembered on the conversation: 1 verified, 2 Turnstile was unavailable. */
+	public function setHumanVerified($conversationId, $state) {
+		$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `human_verified` = '" . (int)$state . "' WHERE `conversation_id` = '" . (int)$conversationId . "'");
+	}
+
 	public function addMessage($conversationId, $role, $content, $meta = null, $inputTokens = 0, $outputTokens = 0, $cost = 0) {
 		$json = $meta === null ? 'NULL' : "'" . $this->db->escape(json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | (defined('JSON_INVALID_UTF8_SUBSTITUTE') ? JSON_INVALID_UTF8_SUBSTITUTE : 0))) . "'";
 

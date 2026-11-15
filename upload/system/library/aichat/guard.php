@@ -11,6 +11,13 @@ class Guard {
 	const CACHE_WRITE_FACTOR = 1.25;
 	const CACHE_READ_FACTOR = 0.1;
 
+	const TURNSTILE_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+	/** New conversations per IP per day (shared IPs: mobile carriers, offices). */
+	const IP_CHATS_DAY = 30;
+	/** Messages per IP per hour when the visitor's browser could not run Turnstile at all. */
+	const UNAVAILABLE_PER_HOUR = 20;
+	const WARN_RATIO = 0.8;
+
 	private $db;
 	private $settings;
 
@@ -82,8 +89,11 @@ class Guard {
 	 *
 	 * @param array $store   per-store settings (Settings::getStore($id))
 	 * @param array|null $conversation existing conversation row or null (new chat)
+	 * @param bool $human    conversation passed Turnstile: the per-IP limits
+	 *                       (shared IPs) are skipped, the per-conversation ones stay
+	 * @param int $storeId   for the store's daily chat cap
 	 */
-	public function checkMessage(array $store, $conversation, $publicId, $ip) {
+	public function checkMessage(array $store, $conversation, $publicId, $ip, $human = false, $storeId = 0) {
 		$perMinute = (int)$store['s_max_msgs_minute'];
 
 		if (!$this->hit('m:c:' . $publicId, 60, $perMinute)) {
@@ -91,7 +101,7 @@ class Guard {
 		}
 
 		// Several tabs/visitors behind one IP: allow a few conversations' worth
-		if (!$this->hit('m:i:' . $ip, 60, $perMinute > 0 ? $perMinute * 3 : 0)) {
+		if (!$human && !$this->hit('m:i:' . $ip, 60, $perMinute > 0 ? $perMinute * 3 : 0)) {
 			return 'rate_limited';
 		}
 
@@ -99,11 +109,109 @@ class Guard {
 			return 'chat_limit';
 		}
 
-		if (!$conversation && !$this->hit('c:i:' . $ip . ':' . date('Y-m-d'), 86400, (int)$store['s_max_chats_day'])) {
-			return 'chat_day_limit';
+		if (!$conversation) {
+			// daily chat cap of the store (s_max_chats_day, 0 = off)
+			$cap = (int)$store['s_max_chats_day'];
+			if ($cap > 0 && $this->chatsToday($storeId) >= $cap) {
+				return 'chat_day_limit';
+			}
+			if (!$human && !$this->hit('c:i:' . $ip . ':' . date('Y-m-d'), 86400, self::IP_CHATS_DAY)) {
+				return 'chat_day_limit';
+			}
 		}
 
 		return '';
+	}
+
+	public function chatsToday($storeId) {
+		$query = $this->db->query("SELECT `chats` FROM `" . DB_PREFIX . "aichat_usage` WHERE `store_id` = '" . (int)$storeId . "' AND `day` = '" . date('Y-m-d') . "'");
+
+		return $query->num_rows ? (int)$query->row['chats'] : 0;
+	}
+
+	/** Extra per-IP budget for visitors whose browser cannot run Turnstile. */
+	public function hitUnavailable($ip) {
+		return $this->hit('t:u:' . $ip, 3600, self::UNAVAILABLE_PER_HOUR);
+	}
+
+	// ---------------------------------------------------------------- client ip
+
+	/** REMOTE_ADDR, or CF-Connecting-IP when g_trust_cf_ip is on (site behind Cloudflare). */
+	public function clientIp(array $server) {
+		$ip = isset($server['REMOTE_ADDR']) ? (string)$server['REMOTE_ADDR'] : '';
+
+		if ((int)$this->settings->getGlobal('g_trust_cf_ip') && !empty($server['HTTP_CF_CONNECTING_IP'])) {
+			$cf = trim((string)$server['HTTP_CF_CONNECTING_IP']);
+			if (filter_var($cf, FILTER_VALIDATE_IP)) {
+				$ip = $cf;
+			}
+		}
+
+		return substr($ip, 0, 45);
+	}
+
+	// ---------------------------------------------------------------- turnstile
+
+	public function turnstileEnabled() {
+		return trim((string)$this->settings->getGlobal('g_turnstile_site')) !== '' && trim((string)$this->settings->getGlobal('g_turnstile_secret')) !== '';
+	}
+
+	public static function turnstileUrl() {
+		return defined('AICHAT_TURNSTILE_URL') ? (string)constant('AICHAT_TURNSTILE_URL') : self::TURNSTILE_URL;
+	}
+
+	/**
+	 * Cloudflare siteverify. Returns 'ok', 'fail' (token rejected) or
+	 * 'outage' (Cloudflare unreachable / 5xx / garbage: fall back to the rate limits).
+	 */
+	public function verifyTurnstile($token, $ip) {
+		$token = (string)$token;
+
+		if ($token === '' || strlen($token) > 2048) {
+			return 'fail';
+		}
+
+		if (!function_exists('curl_init')) {
+			return 'outage';
+		}
+
+		$ch = curl_init(self::turnstileUrl());
+		curl_setopt_array($ch, array(
+			CURLOPT_POST           => true,
+			CURLOPT_POSTFIELDS     => http_build_query(array(
+				'secret'   => trim((string)$this->settings->getGlobal('g_turnstile_secret')),
+				'response' => $token,
+				'remoteip' => $ip,
+			)),
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_CONNECTTIMEOUT => 4,
+			CURLOPT_TIMEOUT        => 6,
+		));
+		$body = curl_exec($ch);
+		$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		curl_close($ch);
+
+		if ($body === false || $status >= 500 || $status === 0) {
+			return 'outage';
+		}
+
+		$json = json_decode((string)$body, true);
+
+		if (!is_array($json) || !array_key_exists('success', $json)) {
+			return 'outage';
+		}
+
+		if ($json['success'] === true) {
+			return 'ok';
+		}
+
+		// Cloudflare's own failure (not the visitor's token) counts as outage
+		$codes = isset($json['error-codes']) && is_array($json['error-codes']) ? $json['error-codes'] : array();
+		if (in_array('internal-error', $codes, true)) {
+			return 'outage';
+		}
+
+		return 'fail';
 	}
 
 	// ---------------------------------------------------------------- budget
@@ -123,6 +231,117 @@ class Guard {
 		}
 
 		return '';
+	}
+
+	/**
+	 * 80% warning e-mail, once per calendar month per scope (all stores /
+	 * one store), to g_warn_email or the store's e-mail, through OpenCart's
+	 * Mail class. Call after usage was recorded. Never throws.
+	 *
+	 * Test hook: with the constant AICHAT_MAIL_FILE defined the mail is
+	 * appended to that file instead of being sent.
+	 */
+	public function budgetWarnings($registry, $storeId) {
+		try {
+			$month = date('Y-m');
+			$sent = $this->settings->getGlobal('g_warn_sent');
+			$sent = is_array($sent) ? $sent : array();
+			$changed = false;
+			$scopes = array();
+
+			$global = (float)$this->settings->getGlobal('g_budget_month');
+			if ($global > 0) {
+				$scopes['all'] = array($global, null);
+			}
+
+			$store = (float)$this->settings->getStore($storeId, 's_budget_month');
+			if ($store > 0) {
+				$scopes['store_' . (int)$storeId] = array($store, (int)$storeId);
+			}
+
+			foreach ($scopes as $scope => $info) {
+				if (isset($sent[$scope]) && $sent[$scope] === $month) {
+					continue;
+				}
+
+				$spent = $this->monthCost($info[1]);
+
+				if ($spent < $info[0] * self::WARN_RATIO) {
+					continue;
+				}
+
+				$sent[$scope] = $month;
+				$changed = true;
+				$this->mailWarning($registry, $scope, $info[1], $spent, $info[0]);
+			}
+
+			if ($changed) {
+				$this->settings->setInternal('g_warn_sent', $sent);
+			}
+		} catch (\Exception $e) {
+			$log = $registry->get('log');
+			if ($log) {
+				$log->write('AI Chat budget warning: ' . $e->getMessage());
+			}
+		}
+	}
+
+	private function mailWarning($registry, $scope, $storeId, $spent, $budget) {
+		$config = $registry->get('config');
+		$to = trim((string)$this->settings->getGlobal('g_warn_email'));
+		$storeName = html_entity_decode((string)$config->get('config_name'), ENT_QUOTES, 'UTF-8');
+		$from = trim((string)$config->get('config_email'));
+
+		if ($storeId === null || (int)$storeId !== (int)$config->get('config_store_id')) {
+			// "all stores": the main store's e-mail and name
+			$row = $this->db->query("SELECT `key`, `value` FROM `" . DB_PREFIX . "setting` WHERE `store_id` = '0' AND `code` = 'config' AND `key` IN ('config_email', 'config_name')")->rows;
+			foreach ($row as $r) {
+				if ($r['key'] === 'config_email' && $to === '') {
+					$to = trim($r['value']);
+				}
+				if ($r['key'] === 'config_name' && $storeId === null) {
+					$storeName = html_entity_decode($r['value'], ENT_QUOTES, 'UTF-8');
+				}
+			}
+		}
+
+		if ($to === '') {
+			$to = $from;
+		}
+
+		if ($to === '' || !filter_var($to, FILTER_VALIDATE_EMAIL)) {
+			return false;
+		}
+
+		$what = $storeId === null ? 'all stores' : 'store "' . $storeName . '"';
+		$subject = 'AI Chat: 80% of the monthly budget used (' . $what . ')';
+		$text = "AI Chat has used " . sprintf('%.2f', $spent) . " USD of the monthly budget of " . sprintf('%.2f', $budget) . " USD for " . $what . " in " . date('F Y') . ".\n"
+			. "When the budget is reached the chat stops answering until next month or until the budget is raised in the admin (Extensions > Modules > AI Chat).\n\n"
+			. "AI Chat е използвал " . sprintf('%.2f', $spent) . " от месечния бюджет " . sprintf('%.2f', $budget) . " USD (" . $what . ").\n";
+
+		if (defined('AICHAT_MAIL_FILE')) {
+			return @file_put_contents((string)constant('AICHAT_MAIL_FILE'), "To: " . $to . "\nSubject: " . $subject . "\n\n" . $text . "\n----\n", FILE_APPEND) !== false;
+		}
+
+		if (!class_exists('Mail')) {
+			return false;
+		}
+
+		$mail = new \Mail($config->get('config_mail_engine'));
+		$mail->parameter = $config->get('config_mail_parameter');
+		$mail->smtp_hostname = $config->get('config_mail_smtp_hostname');
+		$mail->smtp_username = $config->get('config_mail_smtp_username');
+		$mail->smtp_password = html_entity_decode((string)$config->get('config_mail_smtp_password'), ENT_QUOTES, 'UTF-8');
+		$mail->smtp_port = $config->get('config_mail_smtp_port');
+		$mail->smtp_timeout = $config->get('config_mail_smtp_timeout');
+		$mail->setTo($to);
+		$mail->setFrom($from !== '' ? $from : $to);
+		$mail->setSender($storeName);
+		$mail->setSubject($subject);
+		$mail->setText($text);
+		$mail->send();
+
+		return true;
 	}
 
 	/** USD spent in the current calendar month; $storeId null = all stores. */

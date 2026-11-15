@@ -15,6 +15,19 @@ $_['widget_messages']    = 'Conversation';
 $_['widget_suggestion']  = 'You may also need';
 
 // Bot name when none is set in the admin
+$_['widget_welcome_back'] = 'Welcome back! Can I help you with anything else?';
+$_['widget_view_order']   = 'View order';
+$_['widget_track']        = 'Track shipment';
+$_['widget_challenge']    = 'Checking that you are not a robot…';
+
+// Cards (built by the server)
+$_['card_special']      = 'Special offers';
+$_['card_contact']      = 'Contact us';
+$_['card_order']        = 'Order #%s';
+$_['card_view_order']   = 'View order';
+$_['card_track']        = 'Track shipment';
+$_['card_delivered']    = 'Delivered';
+
 $_['default_bot_name']   = 'Alex';
 
 // Errors (already localised, safe to show)
@@ -31,3 +44,4 @@ $_['error_api_error']      = 'The assistant could not answer right now. Please t
 $_['error_refusal']        = 'Sorry, I cannot help with that. For anything about our products, just ask!';
 $_['error_turnstile']      = 'Please confirm that you are not a robot and try again.';
 $_['error_contacts_page']  = 'see our Contact page';
+$_['error_challenge']      = 'Please wait a moment, we are checking that you are not a robot.';

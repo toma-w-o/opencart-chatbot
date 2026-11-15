@@ -23,6 +23,7 @@ class LinkFilter {
 	const TLDS = 'com|net|org|info|biz|eu|bg|gr|ro|de|at|ch|uk|fr|it|es|pt|nl|be|pl|cz|sk|hu|rs|mk|al|tr|cy|ru|ua|us|ca|io|co|me|tv|app|dev|xyz|shop|store|online|site|top|club|link|ly|to|gl|be|cn|jp';
 
 	private $hosts = array();
+	private $urls = array();
 	private $buffer = '';
 
 	public function __construct(array $allowedHosts = array()) {
@@ -45,8 +46,47 @@ class LinkFilter {
 		}
 	}
 
+	/**
+	 * Allows one exact URL on a foreign host (courier tracking link of a
+	 * verified order). Only that URL passes, not the rest of the host.
+	 */
+	public function allowUrl($url) {
+		$key = self::urlKey($url);
+
+		if ($key !== '') {
+			$this->urls[$key] = true;
+		}
+	}
+
+	/** host (lowercase, no www) + path + query; scheme and fragment ignored. */
+	public static function urlKey($url) {
+		$url = str_replace('&amp;', '&', trim((string)$url));
+
+		if (substr($url, 0, 2) === '//') {
+			$url = 'https:' . $url;
+		} elseif (!preg_match('/^[a-z][a-z0-9+.-]*:/i', $url)) {
+			$url = 'https://' . $url;
+		}
+
+		$parts = parse_url($url);
+
+		if (!$parts || empty($parts['host'])) {
+			return '';
+		}
+
+		$host = preg_replace('/^www\./', '', strtolower($parts['host']));
+		$path = isset($parts['path']) ? $parts['path'] : '';
+		$path = $path === '/' ? '' : $path;
+
+		return $host . $path . (isset($parts['query']) && $parts['query'] !== '' ? '?' . $parts['query'] : '');
+	}
+
 	public function isAllowedUrl($url) {
 		$url = trim($url);
+
+		if ($this->urls && isset($this->urls[self::urlKey($url)]) && preg_match('/^(https?:)?\/\/|^www\./i', $url)) {
+			return true;
+		}
 
 		if ($url === '') {
 			return false;

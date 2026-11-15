@@ -39,6 +39,30 @@ class Settings {
 			'g_turnstile_secret'     => '',
 			'g_retention_months'     => 12,
 			'g_image_retention_days' => 30,
+			'g_warn_email'           => '',
+			'g_trust_cf_ip'          => 0,
+			'g_couriers'             => self::defaultCouriers(),
+			// internal (written by the module, not by the admin form)
+			'g_schema'               => 0,
+			'g_warn_sent'            => array(),
+		);
+	}
+
+	/** Global keys the module maintains itself; saveGlobal() ignores them. */
+	public static function internalKeys() {
+		return array('g_secret', 'g_schema', 'g_warn_sent');
+	}
+
+	/** Courier list seeded at install: {code, name, type: speedy|link, hosts[], track_url with {number}}. */
+	public static function defaultCouriers() {
+		return array(
+			array(
+				'code'      => 'speedy',
+				'name'      => 'Speedy',
+				'type'      => 'speedy',
+				'hosts'     => array('speedy.bg'),
+				'track_url' => 'https://www.speedy.bg/bg/track-shipment?shipmentNumber={number}',
+			),
 		);
 	}
 
@@ -64,6 +88,30 @@ class Settings {
 			's_max_msgs_chat'     => 40,
 			's_max_msgs_minute'   => 6,
 			's_max_len'           => 1000,
+			// round 2: appearance
+			's_color_accent'          => '#4f46e5',
+			's_color_header_bg'       => '#4f46e5',
+			's_color_header_text'     => '#ffffff',
+			's_color_user_bg'         => '#4f46e5',
+			's_color_user_text'       => '#ffffff',
+			's_launcher_style'        => 'avatar',
+			's_launcher_text'         => array(),
+			's_launcher_shape'        => 'circle',
+			's_launcher_size'         => 56,
+			's_launcher_avatar_size'  => 0, // 0 = automatic: 45, or 36 when text is shown
+			's_pos_desktop_side'      => 'right',
+			's_pos_desktop_x'         => 20,
+			's_pos_desktop_y'         => 20,
+			's_pos_mobile_side'       => 'right',
+			's_pos_mobile_x'          => 20,
+			's_pos_mobile_y'          => 20,
+			's_zindex'                => 2147483000,
+			's_custom_css'            => '',
+			// round 2: behaviour
+			's_welcome_back'          => array(),
+			's_quick_replies'         => array(),
+			's_resume_days'           => 7,
+			's_courier'               => '',
 		);
 	}
 
@@ -75,7 +123,7 @@ class Settings {
 
 		if ($key === null) {
 			$all = array_merge(self::globalDefaults(), $values);
-			unset($all['g_secret']);
+			unset($all['g_secret'], $all['g_warn_sent']);
 			return $this->cast($all);
 		}
 
@@ -127,7 +175,9 @@ class Settings {
 	/** Saves the given global keys only; other keys are left untouched. `g_secret` is never written here. */
 	public function saveGlobal(array $data) {
 		$allowed = self::globalDefaults();
-		unset($allowed['g_secret']);
+		foreach (self::internalKeys() as $internal) {
+			unset($allowed[$internal]);
+		}
 
 		foreach ($data as $key => $value) {
 			$name = $this->normalise($key, 'g');
@@ -170,6 +220,120 @@ class Settings {
 		return $this->getSecret();
 	}
 
+	/** Writes one module-maintained global key (g_schema, g_warn_sent). */
+	public function setInternal($key, $value) {
+		$name = $this->normalise($key, 'g');
+
+		if (in_array($name, self::internalKeys(), true) && $name !== 'g_secret') {
+			$this->write(0, $name, $value);
+			$this->rows = null;
+		}
+	}
+
+	/** Couriers as a clean list: code => {code, name, type, hosts[], track_url}. */
+	public function couriers() {
+		$out = array();
+		$list = $this->getGlobal('g_couriers');
+
+		foreach (is_array($list) ? $list : array() as $c) {
+			if (!is_array($c) || empty($c['code'])) {
+				continue;
+			}
+			$code = strtolower(preg_replace('/[^a-z0-9_-]/i', '', (string)$c['code']));
+			if ($code === '') {
+				continue;
+			}
+			$hosts = isset($c['hosts']) ? $c['hosts'] : array();
+			if (is_string($hosts)) {
+				$hosts = preg_split('/[\s,;]+/', $hosts, -1, PREG_SPLIT_NO_EMPTY);
+			}
+			$clean = array();
+			foreach (is_array($hosts) ? $hosts : array() as $h) {
+				$h = strtolower(trim((string)$h));
+				if (strpos($h, '://') !== false) {
+					$h = (string)parse_url($h, PHP_URL_HOST);
+				}
+				$h = preg_replace('/^www\./', '', $h);
+				if ($h !== '') {
+					$clean[] = $h;
+				}
+			}
+			$type = isset($c['type']) && $c['type'] === 'speedy' ? 'speedy' : 'link';
+			$out[$code] = array(
+				'code'      => $code,
+				'name'      => isset($c['name']) && trim((string)$c['name']) !== '' ? html_entity_decode(trim((string)$c['name']), ENT_QUOTES, 'UTF-8') : $code,
+				'type'      => $type,
+				'hosts'     => $clean,
+				'track_url' => isset($c['track_url']) ? html_entity_decode(trim((string)$c['track_url']), ENT_QUOTES, 'UTF-8') : '',
+			);
+		}
+
+		return $out;
+	}
+
+	// ---- courier API credentials (file per courier, never in the database, never echoed)
+
+	public static function courierFile($code) {
+		$code = strtolower(preg_replace('/[^a-z0-9_-]/i', '', (string)$code));
+
+		return rtrim(DIR_STORAGE, '/') . '/aichat/courier_' . $code . '.php';
+	}
+
+	/** $secret e.g. array('username' => .., 'password' => ..); an empty array deletes it. */
+	public function setCourierSecret($code, array $secret) {
+		$code = strtolower(preg_replace('/[^a-z0-9_-]/i', '', (string)$code));
+
+		if ($code === '') {
+			return false;
+		}
+
+		$this->protectDir();
+		$file = self::courierFile($code);
+		$clean = array();
+
+		foreach ($secret as $k => $v) {
+			if (is_scalar($v) && trim((string)$v) !== '') {
+				$clean[(string)$k] = trim((string)$v);
+			}
+		}
+
+		if (!$clean) {
+			if (is_file($file)) {
+				@unlink($file);
+			}
+			return true;
+		}
+
+		$php = "<?php\n// AI Chat courier credentials. Do not share.\nreturn " . var_export($clean, true) . ";\n";
+		$ok = @file_put_contents($file, $php, LOCK_EX) !== false;
+
+		if ($ok) {
+			@chmod($file, 0600);
+			if (function_exists('opcache_invalidate')) {
+				@opcache_invalidate($file, true);
+			}
+		}
+
+		return $ok;
+	}
+
+	public function hasCourierSecret($code) {
+		return (bool)$this->getCourierSecret($code);
+	}
+
+	/** Server-side only (courier adapters). */
+	public function getCourierSecret($code) {
+		$file = self::courierFile($code);
+
+		if (!is_file($file)) {
+			return array();
+		}
+
+		$data = include $file;
+
+		return is_array($data) ? $data : array();
+	}
+
 	// ---- API key (file, never in the database, never echoed) ----
 
 	public static function keyFile() {
@@ -178,19 +342,7 @@ class Settings {
 
 	public function setApiKey($key) {
 		$key = trim((string)$key);
-		$dir = dirname(self::keyFile());
-
-		if (!is_dir($dir)) {
-			@mkdir($dir, 0700, true);
-		}
-
-		if (!is_file($dir . '/.htaccess')) {
-			@file_put_contents($dir . '/.htaccess', "Require all denied\nDeny from all\n");
-		}
-
-		if (!is_file($dir . '/index.html')) {
-			@file_put_contents($dir . '/index.html', '');
-		}
+		$this->protectDir();
 
 		if ($key === '') {
 			if (is_file(self::keyFile())) {
@@ -210,6 +362,22 @@ class Settings {
 		}
 
 		return $ok;
+	}
+
+	private function protectDir() {
+		$dir = dirname(self::keyFile());
+
+		if (!is_dir($dir)) {
+			@mkdir($dir, 0700, true);
+		}
+
+		if (!is_file($dir . '/.htaccess')) {
+			@file_put_contents($dir . '/.htaccess', "Require all denied\nDeny from all\n");
+		}
+
+		if (!is_file($dir . '/index.html')) {
+			@file_put_contents($dir . '/index.html', '');
+		}
 	}
 
 	public function hasApiKey() {

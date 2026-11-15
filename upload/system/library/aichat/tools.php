@@ -20,8 +20,14 @@ class Tools {
 	private $languageId;
 	private $customerGroupId;
 
+	const MAX_LINKS = 6;
+
 	/** product cards collected by show_products during one reply */
 	private $cards = array();
+	/** link / order / tracking cards collected during one reply */
+	private $linkCards = array();
+	private $settings = null;
+	private $orders = null;
 	private static $mainCategoryColumn = null;
 
 	public function __construct($registry, $storeId = null, $languageId = null) {
@@ -31,6 +37,21 @@ class Tools {
 		$this->storeId = $storeId === null ? (int)$this->config->get('config_store_id') : (int)$storeId;
 		$this->languageId = $languageId === null ? (int)$this->config->get('config_language_id') : (int)$languageId;
 		$this->customerGroupId = (int)$this->config->get('config_customer_group_id');
+	}
+
+	/**
+	 * Server-side context for the order tools: settings, the conversation row
+	 * (verification state) and the visitor's IP (attempt limit).
+	 */
+	public function setContext(Settings $settings, $conversation, $ip) {
+		$this->settings = $settings;
+		$this->orders = new Orders($this->registry, $settings, $this->storeId, $this->languageId);
+		$this->orders->setConversation($conversation, $ip);
+	}
+
+	/** @return Orders|null */
+	public function orders() {
+		return $this->orders;
 	}
 
 	// ================================================================ definitions
@@ -111,6 +132,120 @@ class Tools {
 					'additionalProperties' => false,
 				),
 			),
+			array(
+				'name'        => 'get_specials',
+				'description' => 'Products of this store that are discounted right now (special price), biggest discount first. Use it when the customer asks for discounts, promotions, sales, a cheaper price or a discount code: you never give codes or promise discounts, you point to these products instead, and attach the specials page with show_links type "special".',
+				'input_schema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'category_id' => array('type' => 'integer', 'description' => 'Optional: only specials in this category (and its subcategories).'),
+						'limit'       => array('type' => 'integer', 'description' => 'Max results, 1-10. Default 6.'),
+					),
+					'additionalProperties' => false,
+				),
+			),
+			array(
+				'name'        => 'list_manufacturers',
+				'description' => 'All brands / manufacturers of this store (id and name). Use it when the customer asks which brands you carry.',
+				'input_schema' => array(
+					'type'                 => 'object',
+					'properties'           => new \stdClass(),
+					'additionalProperties' => false,
+				),
+			),
+			array(
+				'name'        => 'search_manufacturers',
+				'description' => 'Find a brand / manufacturer of this store by name. Returns ids for show_links and for telling the customer whether the brand is carried.',
+				'input_schema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'query' => array('type' => 'string', 'description' => 'Brand name or part of it.'),
+					),
+					'required'             => array('query'),
+					'additionalProperties' => false,
+				),
+			),
+			array(
+				'name'        => 'show_links',
+				'description' => 'Show link cards under your reply (title, picture when there is one, link), built by the store. Call it whenever you name a category, brand or information page, when you point to the discounted products (type "special") or to the contact page (type "contact"). Ids come from the category tree, the information page list, list_manufacturers / search_manufacturers. Never write these URLs yourself.',
+				'input_schema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'items' => array(
+							'type'        => 'array',
+							'description' => 'Up to 6 links, in the order to show them.',
+							'items'       => array(
+								'type'       => 'object',
+								'properties' => array(
+									'type' => array('type' => 'string', 'enum' => array('category', 'manufacturer', 'information', 'special', 'contact')),
+									'id'   => array('type' => 'integer', 'description' => 'category_id / manufacturer_id / information_id; not used for special and contact.'),
+								),
+								'required'             => array('type'),
+								'additionalProperties' => false,
+							),
+						),
+					),
+					'required'             => array('items'),
+					'additionalProperties' => false,
+				),
+			),
+			array(
+				'name'        => 'find_order',
+				'description' => 'Look up an order for a visitor (guest or logged in) by order number AND the phone number given in the order. Both are required: if one is missing, ask the customer for it in a natural way first (no forms). The store checks them; on success you get status, products, totals, delivery address, history and tracking numbers, and the customer sees an order card. On failure the reply is always the same and does not say which part was wrong - never guess, just ask to check both. Attempts are limited.',
+				'input_schema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'order_id' => array('type' => 'string', 'description' => 'Order number as the customer wrote it, e.g. "1234" or "#1234".'),
+						'phone'    => array('type' => 'string', 'description' => 'Phone number as the customer wrote it, any format.'),
+					),
+					'required'             => array('order_id', 'phone'),
+					'additionalProperties' => false,
+				),
+			),
+			array(
+				'name'        => 'my_orders',
+				'description' => 'Recent orders of the logged-in customer in this store (number, date, status, total). Only for logged-in visitors; the store knows who they are, never ask them for their identity. For guests use find_order.',
+				'input_schema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'limit' => array('type' => 'integer', 'description' => '1-10, default 5.'),
+					),
+					'additionalProperties' => false,
+				),
+			),
+			array(
+				'name'        => 'my_order',
+				'description' => 'Details of one order of the logged-in customer: status, products, totals, delivery address, history, tracking numbers. Shows an order card.',
+				'input_schema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'order_id' => array('type' => 'string', 'description' => 'Order number.'),
+					),
+					'required'             => array('order_id'),
+					'additionalProperties' => false,
+				),
+			),
+			array(
+				'name'        => 'my_wishlist',
+				'description' => 'Products in the logged-in customer\'s wishlist in this store (with prices and availability).',
+				'input_schema' => array(
+					'type'                 => 'object',
+					'properties'           => new \stdClass(),
+					'additionalProperties' => false,
+				),
+			),
+			array(
+				'name'        => 'track_shipment',
+				'description' => 'Live status of a shipment from the courier. Only tracking numbers of an order verified in this chat (find_order) or of the logged-in customer\'s own order (my_order) work. Shows a tracking card with the courier link. If live status is not available, give the customer the tracking card.',
+				'input_schema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'number' => array('type' => 'string', 'description' => 'Tracking number from the order details.'),
+					),
+					'required'             => array('number'),
+					'additionalProperties' => false,
+				),
+			),
 		);
 
 		if ($eagerStreaming) {
@@ -168,6 +303,71 @@ class Tools {
 					}
 					$label = isset($input['label']) && $input['label'] === 'suggestion' ? 'suggestion' : 'matches';
 					return $this->ok($this->showProducts($input['product_ids'], $label));
+
+				case 'get_specials':
+					$category = isset($input['category_id']) && is_numeric($input['category_id']) ? (int)$input['category_id'] : 0;
+					$limit = isset($input['limit']) && is_numeric($input['limit']) ? (int)$input['limit'] : 6;
+					return $this->ok($this->getSpecials($category, $limit));
+
+				case 'list_manufacturers':
+					return $this->ok(array('manufacturers' => $this->listManufacturers('')));
+
+				case 'search_manufacturers':
+					if (!isset($input['query']) || !is_string($input['query']) || trim($input['query']) === '') {
+						return $this->error('query (string) is required');
+					}
+					return $this->ok(array('manufacturers' => $this->listManufacturers($input['query'])));
+
+				case 'show_links':
+					if (!isset($input['items']) || !is_array($input['items'])) {
+						return $this->error('items (array) is required');
+					}
+					return $this->ok($this->showLinks($input['items']));
+
+				case 'find_order':
+					if (!$this->orders) {
+						return $this->error('orders are not available');
+					}
+					$orderId = isset($input['order_id']) && is_scalar($input['order_id']) ? (string)$input['order_id'] : '';
+					$phone = isset($input['phone']) && is_scalar($input['phone']) ? (string)$input['phone'] : '';
+					if (trim($orderId) === '' || trim($phone) === '') {
+						return $this->error('order_id and phone are both required; ask the customer for the missing one');
+					}
+					$result = $this->orders->findOrder($orderId, $phone);
+					$this->collectOrderCards();
+					return $this->ok($result);
+
+				case 'my_orders':
+					if (!$this->orders) {
+						return $this->error('orders are not available');
+					}
+					$limit = isset($input['limit']) && is_numeric($input['limit']) ? (int)$input['limit'] : 5;
+					return $this->ok($this->orders->myOrders($limit));
+
+				case 'my_order':
+					if (!$this->orders) {
+						return $this->error('orders are not available');
+					}
+					if (!isset($input['order_id']) || !is_scalar($input['order_id'])) {
+						return $this->error('order_id is required');
+					}
+					$result = $this->orders->myOrder((string)$input['order_id']);
+					$this->collectOrderCards();
+					return $this->ok($result);
+
+				case 'my_wishlist':
+					return $this->ok($this->myWishlist());
+
+				case 'track_shipment':
+					if (!$this->orders) {
+						return $this->error('orders are not available');
+					}
+					if (!isset($input['number']) || !is_scalar($input['number'])) {
+						return $this->error('number is required');
+					}
+					$result = $this->orders->trackShipment((string)$input['number']);
+					$this->collectOrderCards();
+					return $this->ok($result);
 			}
 		} catch (\Exception $e) {
 			return $this->error('tool failed');
@@ -185,6 +385,33 @@ class Tools {
 		$this->cards = array();
 
 		return $groups;
+	}
+
+	/**
+	 * Link / order / tracking cards collected since the last call (and clears
+	 * them): list of {type, title, subtitle?, href, image?}.
+	 */
+	public function takeLinkCards() {
+		$cards = $this->linkCards;
+		$this->linkCards = array();
+
+		return $cards;
+	}
+
+	private function collectOrderCards() {
+		foreach ($this->orders->takeCards() as $card) {
+			$this->addLinkCard($card);
+		}
+	}
+
+	private function addLinkCard(array $card) {
+		foreach ($this->linkCards as $have) {
+			if ($have['type'] === $card['type'] && $have['href'] === $card['href'] && $have['title'] === $card['title']) {
+				return;
+			}
+		}
+
+		$this->linkCards[] = $card;
 	}
 
 	private function ok($data) {
@@ -682,6 +909,194 @@ class Tools {
 			. " WHERE m.manufacturer_id = '" . (int)$manufacturerId . "'")->row;
 
 		return $row ? $this->text($row['name']) : null;
+	}
+
+	// ================================================================ specials, brands, wishlist
+
+	public function getSpecials($categoryId = 0, $limit = 6) {
+		$limit = max(1, min(self::MAX_SEARCH, (int)$limit));
+		$group = (int)$this->customerGroupId;
+
+		$sql = $this->productSelect() . $this->productFrom()
+			. " AND EXISTS (SELECT 1 FROM `" . DB_PREFIX . "product_special` ps WHERE ps.product_id = p.product_id AND ps.customer_group_id = '" . $group . "' AND ((ps.date_start = '0000-00-00' OR ps.date_start < NOW()) AND (ps.date_end = '0000-00-00' OR ps.date_end > NOW())))";
+
+		if ($categoryId > 0) {
+			$sql .= " AND EXISTS (SELECT 1 FROM `" . DB_PREFIX . "product_to_category` p2c JOIN `" . DB_PREFIX . "category_path` cp ON (cp.category_id = p2c.category_id) WHERE p2c.product_id = p.product_id AND cp.path_id = '" . (int)$categoryId . "')";
+		}
+
+		$sql .= " ORDER BY (p.quantity > 0) DESC, (p.price - special) / GREATEST(p.price, 0.01) DESC, p.sort_order ASC LIMIT " . ($limit + 1);
+
+		$rows = $this->db->query($sql)->rows;
+		$more = count($rows) > $limit;
+
+		return array(
+			'products'       => $this->present(array_slice($rows, 0, $limit), false),
+			'more_available' => $more,
+			'note'           => 'Show the best fitting ones with show_products and attach the specials page with show_links type "special". Never give discount codes or promise other discounts.',
+		);
+	}
+
+	public function listManufacturers($query = '') {
+		$sql = "SELECT m.manufacturer_id, m.name FROM `" . DB_PREFIX . "manufacturer` m"
+			. " JOIN `" . DB_PREFIX . "manufacturer_to_store` m2s ON (m2s.manufacturer_id = m.manufacturer_id AND m2s.store_id = '" . (int)$this->storeId . "')";
+
+		$words = self::words($query);
+
+		if ($words) {
+			$conds = array();
+			foreach ($words as $word) {
+				$conds[] = "m.name LIKE " . $this->like($word);
+			}
+			$sql .= " WHERE " . implode(' AND ', $conds);
+		}
+
+		$rows = $this->db->query($sql . " ORDER BY m.sort_order, m.name LIMIT 200")->rows;
+		$out = array();
+
+		foreach ($rows as $row) {
+			$out[] = array('manufacturer_id' => (int)$row['manufacturer_id'], 'name' => $this->text($row['name']));
+		}
+
+		return $out;
+	}
+
+	public function myWishlist() {
+		$customer = $this->registry->get('customer');
+
+		if (!$customer || !$customer->isLogged()) {
+			return array('error' => 'not_logged_in', 'message' => 'The wishlist is available to logged-in customers only.');
+		}
+
+		$ids = array();
+		$rows = $this->db->query("SELECT `product_id` FROM `" . DB_PREFIX . "customer_wishlist` WHERE `customer_id` = '" . (int)$customer->getId() . "' ORDER BY `date_added` DESC LIMIT 30")->rows;
+
+		foreach ($rows as $row) {
+			$ids[] = (int)$row['product_id'];
+		}
+
+		return array('products' => $this->present($this->productRows($ids), false), 'note' => $ids ? 'Use show_products to show them.' : 'The wishlist is empty.');
+	}
+
+	// ================================================================ link cards
+
+	public function showLinks(array $items) {
+		$shown = array();
+		$missing = array();
+
+		foreach (array_slice($items, 0, self::MAX_LINKS) as $item) {
+			if (!is_array($item) || empty($item['type']) || !is_string($item['type'])) {
+				continue;
+			}
+			$id = isset($item['id']) && is_numeric($item['id']) ? (int)$item['id'] : 0;
+			$card = $this->linkCard($item['type'], $id);
+			if ($card) {
+				$this->addLinkCard($card);
+				$shown[] = array('type' => $item['type'], 'title' => $card['title']);
+			} else {
+				$missing[] = array('type' => $item['type'], 'id' => $id);
+			}
+		}
+
+		return array('shown' => $shown, 'not_found' => $missing, 'note' => 'Link cards are displayed under your reply. Do not repeat the links.');
+	}
+
+	/** {type, title, subtitle?, href, image?} built from store-bound data, or null. */
+	public function linkCard($type, $id) {
+		$url = $this->registry->get('url');
+
+		if (!$url) {
+			return null;
+		}
+
+		switch ($type) {
+			case 'category':
+				$row = $this->db->query("SELECT c.category_id, c.image, cd.name FROM `" . DB_PREFIX . "category` c"
+					. " JOIN `" . DB_PREFIX . "category_description` cd ON (cd.category_id = c.category_id AND cd.language_id = '" . (int)$this->languageId . "')"
+					. " JOIN `" . DB_PREFIX . "category_to_store` c2s ON (c2s.category_id = c.category_id AND c2s.store_id = '" . (int)$this->storeId . "')"
+					. " WHERE c.category_id = '" . (int)$id . "' AND c.status = '1'")->row;
+				if (!$row) {
+					return null;
+				}
+				$path = array();
+				foreach ($this->db->query("SELECT path_id FROM `" . DB_PREFIX . "category_path` WHERE category_id = '" . (int)$id . "' ORDER BY level")->rows as $p) {
+					$path[] = (int)$p['path_id'];
+				}
+				$paths = $this->categoryPaths(array($id));
+				$card = array('type' => 'category', 'title' => $this->text($row['name']), 'href' => $this->href('product/category', 'path=' . ($path ? implode('_', $path) : (int)$id)));
+				if (isset($paths[$id]) && $paths[$id] !== $card['title']) {
+					$card['subtitle'] = $paths[$id];
+				}
+				return $this->withImage($card, $row['image']);
+
+			case 'manufacturer':
+				$row = $this->db->query("SELECT m.manufacturer_id, m.name, m.image FROM `" . DB_PREFIX . "manufacturer` m"
+					. " JOIN `" . DB_PREFIX . "manufacturer_to_store` m2s ON (m2s.manufacturer_id = m.manufacturer_id AND m2s.store_id = '" . (int)$this->storeId . "')"
+					. " WHERE m.manufacturer_id = '" . (int)$id . "'")->row;
+				if (!$row) {
+					return null;
+				}
+				return $this->withImage(array('type' => 'manufacturer', 'title' => $this->text($row['name']), 'href' => $this->href('product/manufacturer/info', 'manufacturer_id=' . (int)$id)), $row['image']);
+
+			case 'information':
+				$title = $this->informationTitle($id);
+				if ($title === null) {
+					return null;
+				}
+				return array('type' => 'information', 'title' => $title, 'href' => $this->href('information/information', 'information_id=' . (int)$id));
+
+			case 'special':
+				return array('type' => 'special', 'title' => $this->lang('card_special', 'Special offers'), 'href' => $this->href('product/special', ''));
+
+			case 'contact':
+				$card = array('type' => 'contact', 'title' => $this->lang('card_contact', 'Contact us'), 'href' => $this->href('information/contact', ''));
+				$parts = array();
+				$contacts = $this->settings ? $this->settings->getStore($this->storeId, 's_contacts') : array();
+				foreach (array('phone', 'email') as $k) {
+					if (!empty($contacts[$k])) {
+						$parts[] = $this->text($contacts[$k]);
+					}
+				}
+				if (!$parts) {
+					foreach (array('config_telephone', 'config_email') as $k) {
+						if (trim((string)$this->config->get($k)) !== '') {
+							$parts[] = trim((string)$this->config->get($k));
+						}
+					}
+				}
+				if ($parts) {
+					$card['subtitle'] = implode(' · ', $parts);
+				}
+				return $card;
+		}
+
+		return null;
+	}
+
+	private function href($route, $args) {
+		return str_replace('&amp;', '&', $this->registry->get('url')->link($route, $args));
+	}
+
+	/** Category / brand picture through OpenCart's image tool (resized + cached). */
+	private function withImage(array $card, $file) {
+		$file = (string)$file;
+		$load = $this->registry->get('load');
+
+		if ($file !== '' && $load && defined('DIR_IMAGE') && is_file(DIR_IMAGE . $file)) {
+			$load->model('tool/image');
+			$model = $this->registry->get('model_tool_image');
+			if ($model) {
+				$card['image'] = (string)$model->resize($file, 100, 100);
+			}
+		}
+
+		return $card;
+	}
+
+	private function lang($key, $fallback) {
+		$language = $this->registry->get('language');
+		$text = $language ? $language->get($key) : $key;
+
+		return ($text === $key || $text === '') ? $fallback : $text;
 	}
 
 	// ================================================================ information
