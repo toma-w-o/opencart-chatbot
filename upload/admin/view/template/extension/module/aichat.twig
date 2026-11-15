@@ -1,0 +1,242 @@
+{{ header }}{{ column_left }}
+<div id="content">
+  <div class="page-header">
+    <div class="container-fluid">
+      <div class="pull-right">
+        <button type="submit" form="form-aichat" data-toggle="tooltip" title="{{ button_save }}" class="btn btn-primary"><i class="fa fa-save"></i></button>
+        <a href="{{ cancel }}" data-toggle="tooltip" title="{{ button_cancel }}" class="btn btn-default"><i class="fa fa-reply"></i></a></div>
+      <h1>{{ heading_title }}</h1>
+      <ul class="breadcrumb">
+        {% for breadcrumb in breadcrumbs %}
+        <li><a href="{{ breadcrumb.href }}">{{ breadcrumb.text }}</a></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="container-fluid">
+    {% if error_warning %}
+    <div class="alert alert-danger alert-dismissible"><i class="fa fa-exclamation-circle"></i> {{ error_warning }}
+      <button type="button" class="close" data-dismiss="alert">&times;</button>
+    </div>
+    {% endif %}
+    {% if success %}
+    <div class="alert alert-success alert-dismissible"><i class="fa fa-check-circle"></i> {{ success }}
+      <button type="button" class="close" data-dismiss="alert">&times;</button>
+    </div>
+    {% endif %}
+    <div class="panel panel-default">
+      <div class="panel-heading">
+        <h3 class="panel-title"><i class="fa fa-pencil"></i> {{ text_edit }}</h3>
+      </div>
+      <div class="panel-body">
+        <form action="{{ action }}" method="post" enctype="multipart/form-data" id="form-aichat" class="form-horizontal">
+          <ul class="nav nav-tabs">
+            <li class="active"><a href="#tab-general" data-toggle="tab">{{ tab_general }}</a></li>
+            {% for store in stores %}
+            <li><a href="#tab-store-{{ store.store_id }}" data-toggle="tab">{{ store.name }}</a></li>
+            {% endfor %}
+          </ul>
+          <div class="tab-content">
+
+            <div class="tab-pane active" id="tab-general">
+              <p class="text-muted">{{ text_global_note }}</p>
+              <div class="form-group">
+                <label class="col-sm-2 control-label" for="input-api-key">{{ entry_api_key }}</label>
+                <div class="col-sm-10">
+                  <input type="password" name="api_key" value="" placeholder="{{ has_key ? text_key_set : text_key_not_set }}" id="input-api-key" class="form-control" autocomplete="new-password" />
+                  <div class="help-block">
+                    {% if has_key %}<span class="label label-success">{{ text_key_set }}</span>{% else %}<span class="label label-warning">{{ text_key_not_set }}</span>{% endif %}
+                    {{ text_key_help }}
+                  </div>
+                </div>
+              </div>
+              <div class="form-group required">
+                <label class="col-sm-2 control-label" for="input-g-model">{{ entry_model }}</label>
+                <div class="col-sm-10">
+                  <input type="text" name="g[g_model]" value="{{ g.g_model }}" id="input-g-model" class="form-control" />
+                  {% if errors.g_model %}<div class="text-danger">{{ errors.g_model }}</div>{% endif %}
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-2 control-label" for="input-g-instructions">{{ entry_instructions }}</label>
+                <div class="col-sm-10"><textarea name="g[g_instructions]" rows="6" id="input-g-instructions" class="form-control">{{ g.g_instructions }}</textarea></div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-2 control-label" for="input-g-price-in">{{ entry_price_in }}</label>
+                <div class="col-sm-4">
+                  <div class="input-group"><input type="text" name="g[g_price_in]" value="{{ g.g_price_in }}" id="input-g-price-in" class="form-control" /><span class="input-group-addon">USD</span></div>
+                  {% if errors.g_price_in %}<div class="text-danger">{{ errors.g_price_in }}</div>{% endif %}
+                </div>
+                <label class="col-sm-2 control-label" for="input-g-price-out">{{ entry_price_out }}</label>
+                <div class="col-sm-4">
+                  <div class="input-group"><input type="text" name="g[g_price_out]" value="{{ g.g_price_out }}" id="input-g-price-out" class="form-control" /><span class="input-group-addon">USD</span></div>
+                  {% if errors.g_price_out %}<div class="text-danger">{{ errors.g_price_out }}</div>{% endif %}
+                </div>
+                <div class="col-sm-offset-2 col-sm-10"><div class="help-block">{{ text_price_help }}</div></div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-2 control-label" for="input-g-budget">{{ entry_budget_month }}</label>
+                <div class="col-sm-10">
+                  <div class="input-group"><input type="text" name="g[g_budget_month]" value="{{ g.g_budget_month }}" id="input-g-budget" class="form-control" /><span class="input-group-addon">USD</span></div>
+                  {% if errors.g_budget_month %}<div class="text-danger">{{ errors.g_budget_month }}</div>{% endif %}
+                  <div class="help-block">{{ text_budget_help }}</div>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-2 control-label" for="input-g-ts-site">{{ entry_turnstile_site }}</label>
+                <div class="col-sm-4"><input type="text" name="g[g_turnstile_site]" value="{{ g.g_turnstile_site }}" id="input-g-ts-site" class="form-control" /></div>
+                <label class="col-sm-2 control-label" for="input-g-ts-secret">{{ entry_turnstile_secret }}</label>
+                <div class="col-sm-4"><input type="text" name="g[g_turnstile_secret]" value="{{ g.g_turnstile_secret }}" id="input-g-ts-secret" class="form-control" autocomplete="off" /></div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-2 control-label" for="input-g-ret-m">{{ entry_retention_months }}</label>
+                <div class="col-sm-4">
+                  <input type="text" name="g[g_retention_months]" value="{{ g.g_retention_months }}" id="input-g-ret-m" class="form-control" />
+                  {% if errors.g_retention_months %}<div class="text-danger">{{ errors.g_retention_months }}</div>{% endif %}
+                </div>
+                <label class="col-sm-2 control-label" for="input-g-ret-d">{{ entry_image_retention_days }}</label>
+                <div class="col-sm-4">
+                  <input type="text" name="g[g_image_retention_days]" value="{{ g.g_image_retention_days }}" id="input-g-ret-d" class="form-control" />
+                  {% if errors.g_image_retention_days %}<div class="text-danger">{{ errors.g_image_retention_days }}</div>{% endif %}
+                </div>
+              </div>
+            </div>
+
+            {% for store in stores %}
+            {% set sid = store.store_id %}
+            {% set s = store.s %}
+            {% set p = 's_' ~ sid ~ '_' %}
+            <div class="tab-pane" id="tab-store-{{ sid }}">
+              <p class="text-muted">{{ text_store_note }}</p>
+              <div class="form-group">
+                <label class="col-sm-2 control-label" for="input-s{{ sid }}-status">{{ entry_status }}</label>
+                <div class="col-sm-10">
+                  <select name="s[{{ sid }}][s_status]" id="input-s{{ sid }}-status" class="form-control">
+                    <option value="1"{% if s.s_status %} selected="selected"{% endif %}>{{ text_enabled }}</option>
+                    <option value="0"{% if not s.s_status %} selected="selected"{% endif %}>{{ text_disabled }}</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-2 control-label" for="input-s{{ sid }}-name">{{ entry_bot_name }}</label>
+                <div class="col-sm-4"><input type="text" name="s[{{ sid }}][s_bot_name]" value="{{ s.s_bot_name }}" id="input-s{{ sid }}-name" class="form-control" /></div>
+                <label class="col-sm-2 control-label" for="input-s{{ sid }}-avatar">{{ entry_avatar }}</label>
+                <div class="col-sm-4">
+                  <select name="s[{{ sid }}][s_avatar]" id="input-s{{ sid }}-avatar" class="form-control">
+                    <option value="default" selected="selected">{{ text_avatar_default }}</option>
+                  </select>
+                </div>
+              </div>
+
+              <fieldset>
+                <legend>{{ text_greeting }}</legend>
+                {% for language in languages %}
+                <div class="form-group">
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-greeting-{{ language.language_id }}">{{ language.name }}</label>
+                  <div class="col-sm-10"><textarea name="s[{{ sid }}][s_greeting][{{ language.language_id }}]" rows="2" id="input-s{{ sid }}-greeting-{{ language.language_id }}" class="form-control">{{ s.s_greeting[language.language_id] }}</textarea></div>
+                </div>
+                {% endfor %}
+              </fieldset>
+
+              <div class="form-group">
+                <label class="col-sm-2 control-label" for="input-s{{ sid }}-instructions">{{ entry_store_instructions }}</label>
+                <div class="col-sm-10"><textarea name="s[{{ sid }}][s_instructions]" rows="5" id="input-s{{ sid }}-instructions" class="form-control">{{ s.s_instructions }}</textarea></div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-2 control-label" for="input-s{{ sid }}-emoji">{{ entry_emoji }}</label>
+                <div class="col-sm-4">
+                  <select name="s[{{ sid }}][s_emoji]" id="input-s{{ sid }}-emoji" class="form-control">
+                    <option value="0"{% if s.s_emoji == 0 and s.s_emoji is not null and s.s_emoji != '' %} selected="selected"{% endif %}>{{ text_none }}</option>
+                    <option value="1"{% if s.s_emoji is null or s.s_emoji == '' or s.s_emoji == 1 %} selected="selected"{% endif %}>{{ text_moderate }}</option>
+                    <option value="2"{% if s.s_emoji == 2 %} selected="selected"{% endif %}>{{ text_lots }}</option>
+                  </select>
+                </div>
+                <label class="col-sm-2 control-label" for="input-s{{ sid }}-olb">{{ entry_order_link_button }}</label>
+                <div class="col-sm-4">
+                  <select name="s[{{ sid }}][s_order_link_button]" id="input-s{{ sid }}-olb" class="form-control">
+                    <option value="1"{% if s.s_order_link_button %} selected="selected"{% endif %}>{{ text_enabled }}</option>
+                    <option value="0"{% if not s.s_order_link_button %} selected="selected"{% endif %}>{{ text_disabled }}</option>
+                  </select>
+                </div>
+              </div>
+
+              <fieldset>
+                <legend>{{ text_contacts }}</legend>
+                <div class="form-group">
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-phone">{{ entry_phone }}</label>
+                  <div class="col-sm-4"><input type="text" name="s[{{ sid }}][s_contacts][phone]" value="{{ s.s_contacts.phone }}" id="input-s{{ sid }}-phone" class="form-control" /></div>
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-email">{{ entry_email }}</label>
+                  <div class="col-sm-4">
+                    <input type="text" name="s[{{ sid }}][s_contacts][email]" value="{{ s.s_contacts.email }}" id="input-s{{ sid }}-email" class="form-control" />
+                    {% if errors[p ~ 'email'] %}<div class="text-danger">{{ errors[p ~ 'email'] }}</div>{% endif %}
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-viber">{{ entry_viber }}</label>
+                  <div class="col-sm-4"><input type="text" name="s[{{ sid }}][s_contacts][viber]" value="{{ s.s_contacts.viber }}" id="input-s{{ sid }}-viber" class="form-control" /></div>
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-whatsapp">{{ entry_whatsapp }}</label>
+                  <div class="col-sm-4"><input type="text" name="s[{{ sid }}][s_contacts][whatsapp]" value="{{ s.s_contacts.whatsapp }}" id="input-s{{ sid }}-whatsapp" class="form-control" /></div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-note">{{ entry_note }}</label>
+                  <div class="col-sm-10"><textarea name="s[{{ sid }}][s_contacts][note]" rows="2" id="input-s{{ sid }}-note" class="form-control">{{ s.s_contacts.note }}</textarea></div>
+                </div>
+              </fieldset>
+
+              <fieldset>
+                <legend>{{ text_work_hours }}</legend>
+                <p class="text-muted">{{ text_work_hours_help }}</p>
+                {% if errors[p ~ 'hours'] %}<div class="text-danger">{{ errors[p ~ 'hours'] }}</div>{% endif %}
+                {% for d in days %}
+                <div class="form-group">
+                  <label class="col-sm-2 control-label">{{ attribute(_context, 'text_day_' ~ d) }}</label>
+                  <div class="col-sm-2"><input type="text" name="s[{{ sid }}][s_work_hours][{{ d }}][from]" value="{{ s.s_work_hours[d].from }}" placeholder="{{ text_from }} 09:00" class="form-control" maxlength="5" /></div>
+                  <div class="col-sm-2"><input type="text" name="s[{{ sid }}][s_work_hours][{{ d }}][to]" value="{{ s.s_work_hours[d].to }}" placeholder="{{ text_to }} 18:00" class="form-control" maxlength="5" /></div>
+                </div>
+                {% endfor %}
+              </fieldset>
+
+              <fieldset>
+                <legend>{{ text_limits }}</legend>
+                <div class="form-group">
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-budget">{{ entry_budget_month }}</label>
+                  <div class="col-sm-4">
+                    <div class="input-group"><input type="text" name="s[{{ sid }}][s_budget_month]" value="{{ s.s_budget_month }}" id="input-s{{ sid }}-budget" class="form-control" /><span class="input-group-addon">USD</span></div>
+                    {% if errors[p ~ 's_budget_month'] %}<div class="text-danger">{{ errors[p ~ 's_budget_month'] }}</div>{% endif %}
+                  </div>
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-mcd">{{ entry_max_chats_day }}</label>
+                  <div class="col-sm-4">
+                    <input type="text" name="s[{{ sid }}][s_max_chats_day]" value="{{ s.s_max_chats_day }}" id="input-s{{ sid }}-mcd" class="form-control" />
+                    {% if errors[p ~ 's_max_chats_day'] %}<div class="text-danger">{{ errors[p ~ 's_max_chats_day'] }}</div>{% endif %}
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-mmc">{{ entry_max_msgs_chat }}</label>
+                  <div class="col-sm-4">
+                    <input type="text" name="s[{{ sid }}][s_max_msgs_chat]" value="{{ s.s_max_msgs_chat }}" id="input-s{{ sid }}-mmc" class="form-control" />
+                    {% if errors[p ~ 's_max_msgs_chat'] %}<div class="text-danger">{{ errors[p ~ 's_max_msgs_chat'] }}</div>{% endif %}
+                  </div>
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-mmm">{{ entry_max_msgs_minute }}</label>
+                  <div class="col-sm-4">
+                    <input type="text" name="s[{{ sid }}][s_max_msgs_minute]" value="{{ s.s_max_msgs_minute }}" id="input-s{{ sid }}-mmm" class="form-control" />
+                    {% if errors[p ~ 's_max_msgs_minute'] %}<div class="text-danger">{{ errors[p ~ 's_max_msgs_minute'] }}</div>{% endif %}
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-ml">{{ entry_max_len }}</label>
+                  <div class="col-sm-4">
+                    <input type="text" name="s[{{ sid }}][s_max_len]" value="{{ s.s_max_len }}" id="input-s{{ sid }}-ml" class="form-control" />
+                    {% if errors[p ~ 's_max_len'] %}<div class="text-danger">{{ errors[p ~ 's_max_len'] }}</div>{% endif %}
+                  </div>
+                </div>
+              </fieldset>
+            </div>
+            {% endfor %}
+
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{{ footer }}
