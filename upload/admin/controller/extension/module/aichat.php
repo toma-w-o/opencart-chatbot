@@ -699,6 +699,7 @@ class ControllerExtensionModuleAichat extends Controller {
 			return $this->json(array('error' => 'permission'));
 		}
 
+		$this->load->language('extension/module/aichat');
 		$this->load->model('extension/module/aichat');
 		$m = $this->model_extension_module_aichat;
 		$sid = $this->storeFilter();
@@ -767,6 +768,15 @@ class ControllerExtensionModuleAichat extends Controller {
 				}
 			}
 		}
+		$named = array();
+		foreach ($tools as $toolName => $toolCount) {
+			$label = $this->language->get('tool_' . $toolName);
+			if ($label == 'tool_' . $toolName) {
+				$label = $toolName;
+			}
+			$named[$label] = (isset($named[$label]) ? $named[$label] : 0) + $toolCount;
+		}
+		$tools = $named;
 		arsort($tools);
 		arsort($topics);
 		uasort($products, function ($a, $b) {

@@ -245,3 +245,19 @@ $_['text_bad_answer'] = 'Bad answer';
 $_['text_flag_hint'] = 'Mark this reply as a bad answer';
 $_['text_flag_note_hint'] = 'What was wrong? (optional note)';
 $_['text_flag_conversation'] = 'Flag whole conversation';
+
+// Tool names on the dashboard
+$_['tool_search_products'] = 'Product search';
+$_['tool_get_product'] = 'Product details';
+$_['tool_show_products'] = 'Product cards shown';
+$_['tool_list_categories'] = 'Category browsing';
+$_['tool_get_information'] = 'Information page read';
+$_['tool_get_specials'] = 'Discounted products';
+$_['tool_list_manufacturers'] = 'Manufacturer list';
+$_['tool_search_manufacturers'] = 'Manufacturer search';
+$_['tool_show_links'] = 'Link cards shown';
+$_['tool_find_order'] = 'Order lookup (guest)';
+$_['tool_my_orders'] = 'Customer\'s orders';
+$_['tool_my_order'] = 'Customer\'s order details';
+$_['tool_my_wishlist'] = 'Customer\'s wishlist';
+$_['tool_track_shipment'] = 'Shipment tracking';

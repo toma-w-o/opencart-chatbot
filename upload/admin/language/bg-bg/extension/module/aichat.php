@@ -245,3 +245,19 @@ $_['text_bad_answer'] = 'Лош отговор';
 $_['text_flag_hint'] = 'Маркирай този отговор като лош';
 $_['text_flag_note_hint'] = 'Какво не беше наред? (по желание)';
 $_['text_flag_conversation'] = 'Маркирай целия разговор';
+
+// Tool names on the dashboard
+$_['tool_search_products'] = 'Търсене на продукти';
+$_['tool_get_product'] = 'Преглед на продукт';
+$_['tool_show_products'] = 'Показани продуктови карти';
+$_['tool_list_categories'] = 'Преглед на категории';
+$_['tool_get_information'] = 'Четене на инфо страница';
+$_['tool_get_specials'] = 'Намалени продукти';
+$_['tool_list_manufacturers'] = 'Преглед на производители';
+$_['tool_search_manufacturers'] = 'Търсене на производител';
+$_['tool_show_links'] = 'Показани линкове';
+$_['tool_find_order'] = 'Проверка на поръчка (гост)';
+$_['tool_my_orders'] = 'Поръчки на клиента';
+$_['tool_my_order'] = 'Преглед на поръчка на клиента';
+$_['tool_my_wishlist'] = 'Любими на клиента';
+$_['tool_track_shipment'] = 'Проследяване на пратка';
