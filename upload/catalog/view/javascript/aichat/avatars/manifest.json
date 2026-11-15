@@ -1,0 +1,38 @@
+[
+  {
+    "id": "maria",
+    "name": "Maria"
+  },
+  {
+    "id": "ivan",
+    "name": "Ivan"
+  },
+  {
+    "id": "nia",
+    "name": "Nia"
+  },
+  {
+    "id": "robot",
+    "name": "Robo"
+  },
+  {
+    "id": "mia",
+    "name": "Mia (cat)"
+  },
+  {
+    "id": "bun",
+    "name": "Bun (bunny)"
+  },
+  {
+    "id": "bru",
+    "name": "Bru (bear)"
+  },
+  {
+    "id": "rex",
+    "name": "Rex (fox)"
+  },
+  {
+    "id": "glow",
+    "name": "Glow (orb)"
+  }
+]

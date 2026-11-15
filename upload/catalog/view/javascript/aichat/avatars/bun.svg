@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" class="ac-bun is-idle" focusable="false" aria-hidden="true"><style>
+svg.ac-bun *{transform-box:fill-box}
+svg.ac-bun .bob{transform-origin:50% 100%;animation:ac-breath 4.2s ease-in-out infinite}
+svg.ac-bun .head{transform-origin:50% 100%}
+svg.ac-bun .eye{transform-origin:50% 50%;animation:ac-blink 4.6s infinite}
+svg.ac-bun .eyes{transform-origin:50% 50%}
+svg.ac-bun .m-smile,svg.ac-bun .m-open{transform-origin:50% 50%}
+svg.ac-bun .m-open{opacity:0;transform:scaleY(.2)}
+svg.ac-bun .think,svg.ac-bun .spark{opacity:0}
+svg.ac-bun .cheek{opacity:.55}
+svg.ac-bun .ring{transform-origin:50% 50%;animation:ac-spin 9s linear infinite}
+svg.ac-bun.is-listening .head{animation:ac-tilt 2.4s ease-in-out infinite}
+svg.ac-bun.is-listening .eyes{transform:scale(1.08)}
+svg.ac-bun.is-listening .ear{animation:ac-ear 1.2s ease-in-out infinite;transform-origin:50% 100%}
+svg.ac-bun.is-thinking .eyes{animation:ac-look 2.4s ease-in-out infinite}
+svg.ac-bun.is-thinking .m-smile{transform:scaleX(.55)}
+svg.ac-bun.is-thinking .think{opacity:1}
+svg.ac-bun.is-thinking .think circle{animation:ac-dot 1.2s ease-in-out infinite}
+svg.ac-bun.is-thinking .think circle:nth-child(2){animation-delay:.2s}
+svg.ac-bun.is-thinking .think circle:nth-child(3){animation-delay:.4s}
+svg.ac-bun.is-talking .m-smile{opacity:0}
+svg.ac-bun.is-talking .m-open{opacity:1;animation:ac-talk .36s ease-in-out infinite}
+svg.ac-bun.is-talking .bob{animation:ac-breath 1.5s ease-in-out infinite}
+svg.ac-bun.is-happy .bob{animation:ac-hop .55s ease-out 2}
+svg.ac-bun.is-happy .eye{animation:none;transform:scaleY(.5)}
+svg.ac-bun.is-happy .cheek{opacity:1}
+svg.ac-bun.is-happy .m-smile{transform:scale(1.25)}
+svg.ac-bun.is-happy .spark{opacity:1;animation:ac-spark .9s ease-in-out 2}
+@keyframes ac-breath{0%,100%{transform:scale(1,1)}50%{transform:scale(1.015,1.03)}}
+@keyframes ac-blink{0%,92%,100%{transform:scaleY(1)}95.5%{transform:scaleY(.08)}}
+@keyframes ac-tilt{0%,100%{transform:rotate(-4deg)}50%{transform:rotate(3deg)}}
+@keyframes ac-ear{0%,100%{transform:rotate(0)}50%{transform:rotate(-8deg)}}
+@keyframes ac-look{0%,100%{transform:translate(-1.6px,-1.6px)}50%{transform:translate(1.6px,-1.6px)}}
+@keyframes ac-dot{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:1;transform:translateY(-2px)}}
+@keyframes ac-talk{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1.15)}}
+@keyframes ac-hop{0%{transform:translateY(0)}40%{transform:translateY(-3px) scale(1.03)}100%{transform:translateY(0)}}
+@keyframes ac-spark{0%,100%{transform:scale(.6) rotate(0)}50%{transform:scale(1.15) rotate(20deg)}}
+@keyframes ac-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){svg.ac-bun *{animation:none!important;transition:none!important}}</style><circle cx="32" cy="32" r="32" fill="#e9f7e1"/><g class="bob"><path d="M9 54C10 45 20 42 32 42S54 45 55 54A32 32 0 0 1 9 54Z" fill="#b49cf0"/><g class="head"><g class="ear"><ellipse cx="24" cy="14" rx="5" ry="11" fill="#f7f3ff"/><ellipse cx="24" cy="14.5" rx="2.4" ry="8" fill="#ffc2d1"/></g><g class="ear"><ellipse cx="40" cy="14" rx="5" ry="11" fill="#f7f3ff"/><ellipse cx="40" cy="14.5" rx="2.4" ry="8" fill="#ffc2d1"/></g><ellipse cx="32" cy="34" rx="16.5" ry="14" fill="#f7f3ff"/><ellipse class="cheek" cx="21.9" cy="38.6" rx="2.6" ry="1.7" fill="#ff8fa3"/><ellipse class="cheek" cx="42.1" cy="38.6" rx="2.6" ry="1.7" fill="#ff8fa3"/><g class="eyes"><g class="eye"><ellipse cx="25.5" cy="33" rx="2.3" ry="2.9" fill="#2b2438"/><circle cx="26.3" cy="32" r=".85" fill="#fff"/></g><g class="eye"><ellipse cx="38.5" cy="33" rx="2.3" ry="2.9" fill="#2b2438"/><circle cx="39.3" cy="32" r=".85" fill="#fff"/></g></g><path class="m-smile" d="M28.6 40.4Q32 44.199999999999996 35.4 40.4" fill="none" stroke="#2b2438" stroke-width="1.6" stroke-linecap="round"/><ellipse class="m-open" cx="32" cy="41.6" rx="2.9" ry="2.7" fill="#6b2c3e"/><path d="M30.4 37.2h3.2L32 38.8Z" fill="#ff8fa3"/></g></g><g class="think" fill="#7c5ccc"><circle cx="44" cy="9" r="2"/><circle cx="50" cy="12.5" r="2"/><circle cx="55" cy="18" r="2"/></g><g class="spark"><path d="M11 11L12.2 13.8L15 15L12.2 16.2L11 19L9.8 16.2L7 15L9.8 13.8Z" fill="#ffc933"/><path d="M53 7.8L53.96 10.04L56.2 11L53.96 11.96L53 14.2L52.04 11.96L49.8 11L52.04 10.04Z" fill="#ffc933"/></g></svg>
