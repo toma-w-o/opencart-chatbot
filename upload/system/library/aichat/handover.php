@@ -57,7 +57,7 @@ class Handover {
 			return array('status' => 'unavailable', 'message' => 'Live chat with a person is not available. ' . $contactHint);
 		}
 
-		if (!Prompt::openAt($store, time())) {
+		if (!Prompt::openAt($store, time(), $this->settings->getGlobal('g_timezone', 'Europe/Sofia'))) {
 			return array('status' => 'outside_hours', 'message' => 'Nobody from the team is working right now (see the working hours). ' . $contactHint);
 		}
 

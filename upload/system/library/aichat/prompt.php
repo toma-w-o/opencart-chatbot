@@ -251,20 +251,29 @@ You are the first line of help, and you can answer most questions yourself. Befo
 		return implode("\n\n", $lines);
 	}
 
-	/** Staff working now (store timezone = PHP default timezone set by OpenCart). */
+	/** Staff working now, in the shop's time zone (g_timezone; OpenCart itself runs PHP in UTC). */
 	public function isOpen(array $store, $now) {
-		return self::openAt($store, $now);
+		return self::openAt($store, $now, $this->settings->getGlobal('g_timezone', 'Europe/Sofia'));
 	}
 
-	public static function openAt(array $store, $now) {
+	public static function openAt(array $store, $now, $timezone = '') {
 		$hours = is_array($store['s_work_hours']) ? $store['s_work_hours'] : array();
-		$key = strtolower(date('D', $now));
+
+		try {
+			$zone = new \DateTimeZone($timezone !== '' ? (string)$timezone : date_default_timezone_get());
+		} catch (\Exception $e) {
+			$zone = new \DateTimeZone(date_default_timezone_get());
+		}
+
+		$local = new \DateTime('@' . (int)$now);
+		$local->setTimezone($zone);
+		$key = strtolower($local->format('D'));
 
 		if (empty($hours[$key]['from']) || empty($hours[$key]['to'])) {
 			return false;
 		}
 
-		$time = date('H:i', $now);
+		$time = $local->format('H:i');
 
 		return $time >= $hours[$key]['from'] && $time < $hours[$key]['to'];
 	}

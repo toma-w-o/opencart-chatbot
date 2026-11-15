@@ -453,3 +453,5 @@ $_['tool_search_kb'] = 'Търсене в базата знания';
 $_['tool_stock_alert'] = 'Известие за наличност';
 $_['text_mode_bot'] = 'с асистента';
 $_['text_mode_closed'] = 'приключен';
+$_['entry_timezone'] = 'Часова зона';
+$_['help_timezone'] = 'Часовата зона, в която са въведени работните часове. Пример: Europe/Sofia, Europe/Athens. При невалидна стойност се ползва Europe/Sofia.';

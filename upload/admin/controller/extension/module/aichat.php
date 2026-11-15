@@ -411,6 +411,7 @@ class ControllerExtensionModuleAichat extends Controller {
 		$data['tg_catalog'] = (string)HTTP_CATALOG;
 		$data['tg_webhook_url'] = $this->link('extension/module/aichat/tg_webhook');
 		$data['tg_test_url'] = $this->link('extension/module/aichat/tg_test');
+		$g['g_timezone'] = !empty($g['g_timezone']) ? $g['g_timezone'] : 'Europe/Sofia';
 		$g['g_model_light'] = isset($g['g_model_light']) && $g['g_model_light'] !== '' ? $g['g_model_light'] : $this->lightModel();
 		foreach (array('g_price_light_in' => 0.1, 'g_price_light_out' => 0.5, 'g_tg_chat_id' => '', 'g_tg_translate' => 0, 'g_tg_staff_lang' => 'bg', 'g_report_weekly' => 0, 'g_report_email' => '') as $k => $def) {
 			$g[$k] = isset($g[$k]) ? $g[$k] : $def;
@@ -497,6 +498,8 @@ class ControllerExtensionModuleAichat extends Controller {
 		$out['g_image_retention_days'] = (int)(isset($in['g_image_retention_days']) ? $in['g_image_retention_days'] : 30);
 		$light = isset($in['g_model_light']) ? trim($in['g_model_light']) : '';
 		$out['g_model_light'] = $light !== '' ? $light : $this->lightModel();
+		$tz = isset($in['g_timezone']) ? trim($in['g_timezone']) : '';
+		$out['g_timezone'] = in_array($tz, timezone_identifiers_list(), true) ? $tz : 'Europe/Sofia';
 		$out['g_price_light_in'] = (float)$this->num(isset($in['g_price_light_in']) ? $in['g_price_light_in'] : 0);
 		$out['g_price_light_out'] = (float)$this->num(isset($in['g_price_light_out']) ? $in['g_price_light_out'] : 0);
 		$out['g_tg_chat_id'] = isset($in['g_tg_chat_id']) ? trim($in['g_tg_chat_id']) : '';

@@ -53,6 +53,7 @@ class Settings {
 			'g_tg_canned'            => array(), // list of {code, text}; staff types /code in the topic
 			'g_report_weekly'        => 0,
 			'g_report_email'         => '',
+			'g_timezone'             => 'Europe/Sofia',
 			// internal (written by the module, not by the admin form)
 			'g_schema'               => 0,
 			'g_warn_sent'            => array(),

@@ -82,6 +82,13 @@
                 <div class="col-sm-6"><div class="help-block" style="padding-top:8px">{{ help_model_light }}</div></div>
               </div>
               <div class="form-group">
+                <label class="col-sm-2 control-label" for="input-g-timezone">{{ entry_timezone }}</label>
+                <div class="col-sm-4">
+                  <input type="text" name="g[g_timezone]" value="{{ g.g_timezone|e('html_attr') }}" id="input-g-timezone" class="form-control" placeholder="Europe/Sofia" />
+                </div>
+                <div class="col-sm-6"><div class="help-block" style="padding-top:8px">{{ help_timezone }}</div></div>
+              </div>
+              <div class="form-group">
                 <label class="col-sm-2 control-label" for="input-g-instructions">{{ entry_instructions }}</label>
                 <div class="col-sm-10">
                   <textarea name="g[g_instructions]" rows="6" id="input-g-instructions" class="form-control">{{ g.g_instructions|e }}</textarea>

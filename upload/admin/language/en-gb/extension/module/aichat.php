@@ -453,3 +453,5 @@ $_['tool_search_kb'] = 'Knowledge base search';
 $_['tool_stock_alert'] = 'Stock alert';
 $_['text_mode_bot'] = 'with the assistant';
 $_['text_mode_closed'] = 'closed';
+$_['entry_timezone'] = 'Time zone';
+$_['help_timezone'] = 'The time zone the working hours are entered in, e.g. Europe/Sofia, Europe/Athens. An invalid value falls back to Europe/Sofia.';
