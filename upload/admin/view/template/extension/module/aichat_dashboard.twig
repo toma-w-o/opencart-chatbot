@@ -1,0 +1,60 @@
+{{ header }}{{ column_left }}
+<div id="content" class="aichat-admin">
+  <div class="page-header">
+    <div class="container-fluid">
+      <div class="pull-right">
+        <a href="index.php?route=extension/module/aichat&user_token={{ user_token }}" class="btn btn-default"><i class="fa fa-cog"></i> {{ menu_settings }}</a>
+      </div>
+      <h1>{{ text_dashboard }}</h1>
+      <ul class="breadcrumb">
+        {% for breadcrumb in breadcrumbs %}
+        <li><a href="{{ breadcrumb.href }}">{{ breadcrumb.text }}</a></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="container-fluid">
+    {{ subnav }}
+
+    <div class="aichat-toolbar">
+      <select id="aichat-store-filter" class="form-control">
+        <option value="">{{ text_all_stores }}</option>
+        {% for store in stores %}<option value="{{ store.store_id }}">{{ store.name|e }}</option>{% endfor %}
+      </select>
+      <div class="btn-group" id="aichat-range">
+        <button type="button" class="btn btn-default" data-range="1">{{ text_range_today }}</button>
+        <button type="button" class="btn btn-default active" data-range="7">{{ text_range_7 }}</button>
+        <button type="button" class="btn btn-default" data-range="30">{{ text_range_30 }}</button>
+      </div>
+      <span class="aichat-muted pull-right" id="aichat-updated"></span>
+    </div>
+
+    <div class="aichat-tiles">
+      <div class="aichat-tile"><span class="aichat-tile-label"><i class="fa fa-comments-o"></i> {{ text_chats }}</span><b data-k="chats">-</b></div>
+      <div class="aichat-tile"><span class="aichat-tile-label"><i class="fa fa-envelope-o"></i> {{ text_messages }}</span><b data-k="messages">-</b></div>
+      <div class="aichat-tile aichat-tile-wide"><span class="aichat-tile-label"><i class="fa fa-usd"></i> {{ text_cost }}</span><b data-k="cost">-</b><div data-k="budget" class="aichat-budget"></div><span class="aichat-tile-hint">{{ text_budget_month_hint }}</span></div>
+      <div class="aichat-tile"><span class="aichat-tile-label"><i class="fa fa-exchange"></i> {{ text_avg_msgs }}</span><b data-k="avg">-</b></div>
+      <div class="aichat-tile"><span class="aichat-tile-label"><i class="fa fa-flag-o"></i> {{ text_flagged }}</span><b data-k="flagged">-</b></div>
+      <div class="aichat-tile"><span class="aichat-tile-label"><i class="fa fa-circle aichat-live-ico"></i> {{ text_active_now }}</span><b data-k="active">-</b></div>
+      <div class="aichat-tile"><span class="aichat-tile-label"><i class="fa fa-user-o"></i> {{ text_handover }}</span><b data-k="handover">-</b></div>
+      <div class="aichat-tile"><span class="aichat-tile-label"><i class="fa fa-exclamation-triangle"></i> {{ text_errors }}</span><b data-k="errors">-</b></div>
+    </div>
+
+    <div class="aichat-panel aichat-live">
+      <h3><span class="aichat-dot is-on"></span> {{ text_live_now }} <small>{{ text_live_hint }}</small></h3>
+      <div id="aichat-live"></div>
+    </div>
+
+    <div class="aichat-grid-2">
+      <div class="aichat-panel"><h3>{{ text_chart_chats }}</h3><div id="chart-chats" class="aichat-chart"></div></div>
+      <div class="aichat-panel"><h3>{{ text_chart_cost }}</h3><div id="chart-cost" class="aichat-chart"></div></div>
+      <div class="aichat-panel"><h3>{{ text_chart_hourly }}</h3><div id="chart-hourly" class="aichat-chart"></div></div>
+      <div class="aichat-panel"><h3>{{ text_chart_products }}</h3><div id="chart-products" class="aichat-chart"></div></div>
+      <div class="aichat-panel"><h3>{{ text_chart_tools }}</h3><div id="chart-tools" class="aichat-chart"></div></div>
+      <div class="aichat-panel"><h3>{{ text_chart_topics }}</h3><div id="chart-topics" class="aichat-chart"></div></div>
+    </div>
+    <p class="aichat-muted">{{ text_dashboard_note }}</p>
+  </div>
+</div>
+<script>window.AICHAT_DASH = {{ config_json }};</script>
+{{ footer }}

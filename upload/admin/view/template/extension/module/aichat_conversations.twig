@@ -1,0 +1,93 @@
+{{ header }}{{ column_left }}
+<div id="content" class="aichat-admin">
+  <div class="page-header">
+    <div class="container-fluid">
+      <h1>{{ text_conversations }}</h1>
+      <ul class="breadcrumb">
+        {% for breadcrumb in breadcrumbs %}
+        <li><a href="{{ breadcrumb.href }}">{{ breadcrumb.text }}</a></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="container-fluid">
+    {{ subnav }}
+    <div class="panel panel-default aichat-card">
+      <div class="panel-body">
+        <form method="get" action="index.php" class="aichat-filters">
+          <input type="hidden" name="route" value="extension/module/aichat/conversations" />
+          <input type="hidden" name="user_token" value="{{ user_token }}" />
+          <div class="row">
+            <div class="col-sm-3"><label>{{ text_store }}</label>
+              <select name="filter_store_id" class="form-control"><option value="">{{ text_all_stores }}</option>
+                {% for st in stores %}<option value="{{ st.store_id }}"{% if filter.store_id != '' and filter.store_id == st.store_id %} selected="selected"{% endif %}>{{ st.name|e }}</option>{% endfor %}
+              </select></div>
+            <div class="col-sm-2"><label>{{ text_language }}</label>
+              <select name="filter_language_id" class="form-control"><option value="">{{ text_all }}</option>
+                {% for lid, lname in language_list %}<option value="{{ lid }}"{% if filter.language_id == lid %} selected="selected"{% endif %}>{{ lname|e }}</option>{% endfor %}
+              </select></div>
+            <div class="col-sm-2"><label>{{ text_date_from }}</label><input type="date" name="filter_date_from" value="{{ filter.date_from }}" class="form-control" /></div>
+            <div class="col-sm-2"><label>{{ text_date_to }}</label><input type="date" name="filter_date_to" value="{{ filter.date_to }}" class="form-control" /></div>
+            <div class="col-sm-3"><label>{{ text_search }}</label><input type="text" name="filter_q" value="{{ filter.q|e('html_attr') }}" placeholder="{{ text_search_hint }}" class="form-control" /></div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <div class="col-sm-2"><label>{{ text_has_order }}</label>
+              <select name="filter_has_order" class="form-control"><option value="">{{ text_all }}</option>
+                <option value="1"{% if filter.has_order == '1' %} selected="selected"{% endif %}>{{ text_yes }}</option>
+                <option value="0"{% if filter.has_order == '0' %} selected="selected"{% endif %}>{{ text_no }}</option></select></div>
+            <div class="col-sm-2"><label>{{ text_flagged }}</label>
+              <select name="filter_flagged" class="form-control"><option value="">{{ text_all }}</option>
+                <option value="1"{% if filter.flagged == '1' %} selected="selected"{% endif %}>{{ text_yes }}</option>
+                <option value="0"{% if filter.flagged == '0' %} selected="selected"{% endif %}>{{ text_no }}</option></select></div>
+            <div class="col-sm-8 text-right" style="padding-top:24px">
+              <a href="{{ clear }}" class="btn btn-default">{{ button_clear }}</a>
+              <button type="submit" class="btn btn-primary"><i class="fa fa-search"></i> {{ button_filter }}</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="panel panel-default aichat-card">
+      <div class="table-responsive">
+        <table class="table table-hover aichat-table">
+          <thead><tr>
+            <th>#</th><th>{{ text_date }}</th><th>{{ text_store }}</th><th>{{ text_language }}</th><th>{{ text_first_message }}</th>
+            <th class="text-right">{{ text_messages }}</th><th class="text-right">{{ text_cost }}</th><th>{{ text_status }}</th><th></th>
+          </tr></thead>
+          <tbody>
+          {% if conversations %}
+            {% for c in conversations %}
+            <tr{% if c.flagged %} class="aichat-row-flag"{% endif %}>
+              <td><a href="{{ c.href }}">{{ c.id }}</a></td>
+              <td class="aichat-nowrap">{{ c.date }}</td>
+              <td><span class="label label-default">{{ c.store|e }}</span></td>
+              <td>{{ c.language|e }}</td>
+              <td class="aichat-cut-wide">{{ c.first|e }}</td>
+              <td class="text-right">{{ c.messages }}</td>
+              <td class="text-right aichat-nowrap">{{ c.cost }}</td>
+              <td class="aichat-nowrap">
+                {% if c.flagged %}<span class="label label-danger"><i class="fa fa-flag"></i> {{ text_flag_short }}</span> {% endif %}
+                {% if c.order %}<span class="label label-info">{{ text_order }} #{{ c.order }}</span> {% endif %}
+                {% if c.customer %}<span class="label label-default">{{ text_customer }} {{ c.customer }}</span> {% endif %}
+                {% if c.mode == 'waiting' %}<span class="label label-danger">{{ text_mode_waiting }}</span>{% elseif c.mode == 'human' %}<span class="label label-warning">{{ text_mode_human }}</span>{% endif %}
+              </td>
+              <td class="text-right"><a href="{{ c.href }}" class="btn btn-default btn-xs">{{ text_open }}</a></td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td class="text-center" colspan="9">{{ text_no_results }}</td></tr>
+          {% endif %}
+          </tbody>
+        </table>
+      </div>
+      <div class="panel-footer">
+        <div class="row">
+          <div class="col-sm-6 text-left">{{ pagination }}</div>
+          <div class="col-sm-6 text-right">{{ results }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{{ footer }}

@@ -1,5 +1,5 @@
 {{ header }}{{ column_left }}
-<div id="content">
+<div id="content" class="aichat-admin">
   <div class="page-header">
     <div class="container-fluid">
       <div class="pull-right">
@@ -14,6 +14,7 @@
     </div>
   </div>
   <div class="container-fluid">
+    {{ subnav }}
     {% if error_warning %}
     <div class="alert alert-danger alert-dismissible"><i class="fa fa-exclamation-circle"></i> {{ error_warning }}
       <button type="button" class="close" data-dismiss="alert">&times;</button>
@@ -24,20 +25,32 @@
       <button type="button" class="close" data-dismiss="alert">&times;</button>
     </div>
     {% endif %}
-    <div class="panel panel-default">
-      <div class="panel-heading">
-        <h3 class="panel-title"><i class="fa fa-pencil"></i> {{ text_edit }}</h3>
-      </div>
+    <form action="{{ action }}" method="post" enctype="multipart/form-data" id="form-aichat" class="form-horizontal" data-start-tab="{{ start_tab }}">
+    <div class="panel panel-default aichat-card">
       <div class="panel-body">
-        <form action="{{ action }}" method="post" enctype="multipart/form-data" id="form-aichat" class="form-horizontal">
-          <ul class="nav nav-tabs">
+          <ul class="nav nav-tabs aichat-tabs" id="aichat-tabs">
             <li class="active"><a href="#tab-general" data-toggle="tab">{{ tab_general }}</a></li>
-            {% for store in stores %}
-            <li><a href="#tab-store-{{ store.store_id }}" data-toggle="tab">{{ store.name }}</a></li>
-            {% endfor %}
+            <li><a href="#tab-protection" data-toggle="tab">{{ tab_protection }}</a></li>
+            <li><a href="#tab-couriers" data-toggle="tab">{{ tab_couriers }}</a></li>
+            <li class="aichat-tab-store"><a href="#tab-assistant" data-toggle="tab">{{ tab_assistant }}</a></li>
+            <li class="aichat-tab-store"><a href="#tab-appearance" data-toggle="tab">{{ tab_appearance }}</a></li>
+            <li class="aichat-tab-store"><a href="#tab-contacts" data-toggle="tab">{{ tab_contacts }}</a></li>
+            <li class="aichat-tab-store"><a href="#tab-orders" data-toggle="tab">{{ tab_orders }}</a></li>
+            <li class="aichat-tab-store"><a href="#tab-limits" data-toggle="tab">{{ tab_limits }}</a></li>
           </ul>
+
+          <div class="aichat-storebar" id="aichat-storebar" style="display:none">
+            <i class="fa fa-shopping-bag"></i> <strong>{{ text_store }}:</strong>
+            <select id="aichat-store-select" class="form-control input-sm">
+              {% for store in stores %}<option value="{{ store.store_id }}">{{ store.name|e }}</option>{% endfor %}
+            </select>
+            <span class="text-muted">{{ text_store_note }}</span>
+            <button type="button" class="btn btn-default btn-sm pull-right" id="aichat-reset-store" data-confirm="{{ text_reset_confirm|e('html_attr') }}"><i class="fa fa-undo"></i> {{ button_reset_store }}</button>
+          </div>
+
           <div class="tab-content">
 
+            <!-- ============ GENERAL ============ -->
             <div class="tab-pane active" id="tab-general">
               <p class="text-muted">{{ text_global_note }}</p>
               <div class="form-group">
@@ -53,190 +66,475 @@
               <div class="form-group required">
                 <label class="col-sm-2 control-label" for="input-g-model">{{ entry_model }}</label>
                 <div class="col-sm-10">
-                  <input type="text" name="g[g_model]" value="{{ g.g_model }}" id="input-g-model" class="form-control" />
+                  <input type="text" name="g[g_model]" value="{{ g.g_model|e('html_attr') }}" id="input-g-model" class="form-control" />
                   {% if errors.g_model %}<div class="text-danger">{{ errors.g_model }}</div>{% endif %}
+                  <div class="help-block">{{ help_model }}</div>
                 </div>
               </div>
               <div class="form-group">
                 <label class="col-sm-2 control-label" for="input-g-instructions">{{ entry_instructions }}</label>
-                <div class="col-sm-10"><textarea name="g[g_instructions]" rows="6" id="input-g-instructions" class="form-control">{{ g.g_instructions }}</textarea></div>
+                <div class="col-sm-10">
+                  <textarea name="g[g_instructions]" rows="6" id="input-g-instructions" class="form-control">{{ g.g_instructions|e }}</textarea>
+                  <div class="help-block">{{ help_instructions }}</div>
+                </div>
               </div>
               <div class="form-group">
                 <label class="col-sm-2 control-label" for="input-g-price-in">{{ entry_price_in }}</label>
                 <div class="col-sm-4">
-                  <div class="input-group"><input type="text" name="g[g_price_in]" value="{{ g.g_price_in }}" id="input-g-price-in" class="form-control" /><span class="input-group-addon">USD</span></div>
+                  <div class="input-group"><input type="text" name="g[g_price_in]" value="{{ g.g_price_in|e('html_attr') }}" id="input-g-price-in" class="form-control" /><span class="input-group-addon">USD / 1M</span></div>
                   {% if errors.g_price_in %}<div class="text-danger">{{ errors.g_price_in }}</div>{% endif %}
                 </div>
                 <label class="col-sm-2 control-label" for="input-g-price-out">{{ entry_price_out }}</label>
                 <div class="col-sm-4">
-                  <div class="input-group"><input type="text" name="g[g_price_out]" value="{{ g.g_price_out }}" id="input-g-price-out" class="form-control" /><span class="input-group-addon">USD</span></div>
+                  <div class="input-group"><input type="text" name="g[g_price_out]" value="{{ g.g_price_out|e('html_attr') }}" id="input-g-price-out" class="form-control" /><span class="input-group-addon">USD / 1M</span></div>
                   {% if errors.g_price_out %}<div class="text-danger">{{ errors.g_price_out }}</div>{% endif %}
                 </div>
                 <div class="col-sm-offset-2 col-sm-10"><div class="help-block">{{ text_price_help }}</div></div>
               </div>
               <div class="form-group">
                 <label class="col-sm-2 control-label" for="input-g-budget">{{ entry_budget_month }}</label>
-                <div class="col-sm-10">
-                  <div class="input-group"><input type="text" name="g[g_budget_month]" value="{{ g.g_budget_month }}" id="input-g-budget" class="form-control" /><span class="input-group-addon">USD</span></div>
+                <div class="col-sm-4">
+                  <div class="input-group"><input type="text" name="g[g_budget_month]" value="{{ g.g_budget_month|e('html_attr') }}" id="input-g-budget" class="form-control" /><span class="input-group-addon">USD</span></div>
                   {% if errors.g_budget_month %}<div class="text-danger">{{ errors.g_budget_month }}</div>{% endif %}
-                  <div class="help-block">{{ text_budget_help }}</div>
                 </div>
-              </div>
-              <div class="form-group">
-                <label class="col-sm-2 control-label" for="input-g-ts-site">{{ entry_turnstile_site }}</label>
-                <div class="col-sm-4"><input type="text" name="g[g_turnstile_site]" value="{{ g.g_turnstile_site }}" id="input-g-ts-site" class="form-control" /></div>
-                <label class="col-sm-2 control-label" for="input-g-ts-secret">{{ entry_turnstile_secret }}</label>
-                <div class="col-sm-4"><input type="text" name="g[g_turnstile_secret]" value="{{ g.g_turnstile_secret }}" id="input-g-ts-secret" class="form-control" autocomplete="off" /></div>
+                <label class="col-sm-2 control-label" for="input-g-warn">{{ entry_warn_email }}</label>
+                <div class="col-sm-4">
+                  <input type="text" name="g[g_warn_email]" value="{{ g.g_warn_email|e('html_attr') }}" id="input-g-warn" class="form-control" />
+                  {% if errors.g_warn_email %}<div class="text-danger">{{ errors.g_warn_email }}</div>{% endif %}
+                </div>
+                <div class="col-sm-offset-2 col-sm-10"><div class="help-block">{{ text_budget_help }} {{ help_warn_email }}</div></div>
               </div>
               <div class="form-group">
                 <label class="col-sm-2 control-label" for="input-g-ret-m">{{ entry_retention_months }}</label>
                 <div class="col-sm-4">
-                  <input type="text" name="g[g_retention_months]" value="{{ g.g_retention_months }}" id="input-g-ret-m" class="form-control" />
+                  <input type="text" name="g[g_retention_months]" value="{{ g.g_retention_months|e('html_attr') }}" id="input-g-ret-m" class="form-control" />
                   {% if errors.g_retention_months %}<div class="text-danger">{{ errors.g_retention_months }}</div>{% endif %}
                 </div>
                 <label class="col-sm-2 control-label" for="input-g-ret-d">{{ entry_image_retention_days }}</label>
                 <div class="col-sm-4">
-                  <input type="text" name="g[g_image_retention_days]" value="{{ g.g_image_retention_days }}" id="input-g-ret-d" class="form-control" />
+                  <input type="text" name="g[g_image_retention_days]" value="{{ g.g_image_retention_days|e('html_attr') }}" id="input-g-ret-d" class="form-control" />
                   {% if errors.g_image_retention_days %}<div class="text-danger">{{ errors.g_image_retention_days }}</div>{% endif %}
                 </div>
+                <div class="col-sm-offset-2 col-sm-10"><div class="help-block">{{ help_retention }}</div></div>
               </div>
             </div>
 
-            {% for store in stores %}
-            {% set sid = store.store_id %}
-            {% set s = store.s %}
-            {% set p = 's_' ~ sid ~ '_' %}
-            <div class="tab-pane" id="tab-store-{{ sid }}">
-              <p class="text-muted">{{ text_store_note }}</p>
-              <div class="form-group">
-                <label class="col-sm-2 control-label" for="input-s{{ sid }}-status">{{ entry_status }}</label>
-                <div class="col-sm-10">
-                  <select name="s[{{ sid }}][s_status]" id="input-s{{ sid }}-status" class="form-control">
-                    <option value="1"{% if s.s_status %} selected="selected"{% endif %}>{{ text_enabled }}</option>
-                    <option value="0"{% if not s.s_status %} selected="selected"{% endif %}>{{ text_disabled }}</option>
-                  </select>
-                </div>
-              </div>
-              <div class="form-group">
-                <label class="col-sm-2 control-label" for="input-s{{ sid }}-name">{{ entry_bot_name }}</label>
-                <div class="col-sm-4"><input type="text" name="s[{{ sid }}][s_bot_name]" value="{{ s.s_bot_name }}" id="input-s{{ sid }}-name" class="form-control" /></div>
-                <label class="col-sm-2 control-label" for="input-s{{ sid }}-avatar">{{ entry_avatar }}</label>
-                <div class="col-sm-4">
-                  <select name="s[{{ sid }}][s_avatar]" id="input-s{{ sid }}-avatar" class="form-control">
-                    <option value="default" selected="selected">{{ text_avatar_default }}</option>
-                  </select>
-                </div>
-              </div>
-
+            <!-- ============ PROTECTION ============ -->
+            <div class="tab-pane" id="tab-protection">
+              <p class="text-muted">{{ text_global_note }}</p>
               <fieldset>
-                <legend>{{ text_greeting }}</legend>
-                {% for language in languages %}
+                <legend>Cloudflare Turnstile</legend>
                 <div class="form-group">
-                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-greeting-{{ language.language_id }}">{{ language.name }}</label>
-                  <div class="col-sm-10"><textarea name="s[{{ sid }}][s_greeting][{{ language.language_id }}]" rows="2" id="input-s{{ sid }}-greeting-{{ language.language_id }}" class="form-control">{{ s.s_greeting[language.language_id] }}</textarea></div>
+                  <label class="col-sm-2 control-label" for="input-g-ts-site">{{ entry_turnstile_site }}</label>
+                  <div class="col-sm-4"><input type="text" name="g[g_turnstile_site]" value="{{ g.g_turnstile_site|e('html_attr') }}" id="input-g-ts-site" class="form-control" /></div>
+                  <label class="col-sm-2 control-label" for="input-g-ts-secret">{{ entry_turnstile_secret }}</label>
+                  <div class="col-sm-4"><input type="text" name="g[g_turnstile_secret]" value="{{ g.g_turnstile_secret|e('html_attr') }}" id="input-g-ts-secret" class="form-control" autocomplete="off" /></div>
+                  <div class="col-sm-offset-2 col-sm-10"><div class="help-block">{{ help_turnstile }}</div></div>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>{{ text_network }}</legend>
+                <div class="form-group">
+                  <label class="col-sm-2 control-label">{{ entry_trust_cf_ip }}</label>
+                  <div class="col-sm-10">
+                    <label class="aichat-switch"><input type="checkbox" name="g[g_trust_cf_ip]" value="1"{% if g.g_trust_cf_ip %} checked="checked"{% endif %} /> {{ text_enabled }}</label>
+                    <div class="help-block">{{ help_trust_cf_ip }}</div>
+                  </div>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>{{ tab_limits }}</legend>
+                <p class="text-muted">{{ help_limits_link }} <a href="#tab-limits" class="aichat-goto-tab">{{ tab_limits }} &rarr;</a></p>
+              </fieldset>
+            </div>
+
+            <!-- ============ COURIERS ============ -->
+            <div class="tab-pane" id="tab-couriers">
+              <p class="text-muted">{{ text_global_note }} {{ help_couriers }}</p>
+              {% if not courier_secrets_supported %}<div class="alert alert-warning">{{ text_courier_secret_unavailable }}</div>{% endif %}
+              <div id="aichat-couriers">
+                {% for c in couriers %}
+                <div class="aichat-courier panel panel-default" data-idx="{{ c.idx }}">
+                  <div class="panel-body">
+                    <button type="button" class="close aichat-courier-del" title="{{ button_remove }}">&times;</button>
+                    <div class="row">
+                      <div class="col-sm-3"><label>{{ entry_courier_name }}</label><input type="text" name="couriers[{{ c.idx }}][name]" value="{{ c.name|e('html_attr') }}" class="form-control" /></div>
+                      <div class="col-sm-2"><label>{{ entry_courier_code }}</label><input type="text" name="couriers[{{ c.idx }}][code]" value="{{ c.code|e('html_attr') }}" class="form-control" placeholder="speedy" /></div>
+                      <div class="col-sm-2"><label>{{ entry_courier_type }}</label>
+                        <select name="couriers[{{ c.idx }}][type]" class="form-control aichat-courier-type">
+                          <option value="speedy"{% if c.type == 'speedy' %} selected="selected"{% endif %}>Speedy (API)</option>
+                          <option value="link"{% if c.type == 'link' %} selected="selected"{% endif %}>{{ text_type_link }}</option>
+                        </select></div>
+                      <div class="col-sm-5"><label>{{ entry_courier_hosts }}</label><input type="text" name="couriers[{{ c.idx }}][hosts]" value="{{ c.hosts|e('html_attr') }}" class="form-control" placeholder="speedy.bg, www.speedy.bg" /></div>
+                    </div>
+                    <div class="row">
+                      <div class="col-sm-12"><label>{{ entry_courier_url }}</label><input type="text" name="couriers[{{ c.idx }}][track_url]" value="{{ c.track_url|e('html_attr') }}" class="form-control" placeholder="https://www.speedy.bg/bg/track-shipment?shipmentNumber={number}" /></div>
+                    </div>
+                    <div class="row aichat-courier-secret">
+                      <div class="col-sm-4"><label>{{ entry_courier_user }}</label><input type="text" name="courier_secret[{{ c.idx }}][username]" value="" class="form-control" autocomplete="off" placeholder="{{ c.secret ? text_saved : '' }}" /></div>
+                      <div class="col-sm-4"><label>{{ entry_courier_pass }}</label><input type="password" name="courier_secret[{{ c.idx }}][password]" value="" class="form-control" autocomplete="new-password" placeholder="{{ c.secret ? text_saved : '' }}" /></div>
+                      <div class="col-sm-4"><p class="help-block">{% if c.secret %}<span class="label label-success">{{ text_saved }}</span> {% endif %}{{ help_courier_secret }}</p></div>
+                    </div>
+                    {% if errors['courier_' ~ c.idx] %}<div class="text-danger">{{ errors['courier_' ~ c.idx] }}</div>{% endif %}
+                  </div>
                 </div>
                 {% endfor %}
-              </fieldset>
-
-              <div class="form-group">
-                <label class="col-sm-2 control-label" for="input-s{{ sid }}-instructions">{{ entry_store_instructions }}</label>
-                <div class="col-sm-10"><textarea name="s[{{ sid }}][s_instructions]" rows="5" id="input-s{{ sid }}-instructions" class="form-control">{{ s.s_instructions }}</textarea></div>
               </div>
-              <div class="form-group">
-                <label class="col-sm-2 control-label" for="input-s{{ sid }}-emoji">{{ entry_emoji }}</label>
-                <div class="col-sm-4">
-                  <select name="s[{{ sid }}][s_emoji]" id="input-s{{ sid }}-emoji" class="form-control">
-                    <option value="0"{% if s.s_emoji == 0 and s.s_emoji is not null and s.s_emoji != '' %} selected="selected"{% endif %}>{{ text_none }}</option>
-                    <option value="1"{% if s.s_emoji is null or s.s_emoji == '' or s.s_emoji == 1 %} selected="selected"{% endif %}>{{ text_moderate }}</option>
-                    <option value="2"{% if s.s_emoji == 2 %} selected="selected"{% endif %}>{{ text_lots }}</option>
-                  </select>
+              <button type="button" class="btn btn-success" id="aichat-courier-add"><i class="fa fa-plus"></i> {{ button_add_courier }}</button>
+              <template id="aichat-courier-tpl">
+                <div class="aichat-courier panel panel-default" data-idx="__I__">
+                  <div class="panel-body">
+                    <button type="button" class="close aichat-courier-del" title="{{ button_remove }}">&times;</button>
+                    <div class="row">
+                      <div class="col-sm-3"><label>{{ entry_courier_name }}</label><input type="text" name="couriers[__I__][name]" value="" class="form-control" /></div>
+                      <div class="col-sm-2"><label>{{ entry_courier_code }}</label><input type="text" name="couriers[__I__][code]" value="" class="form-control" placeholder="speedy" /></div>
+                      <div class="col-sm-2"><label>{{ entry_courier_type }}</label>
+                        <select name="couriers[__I__][type]" class="form-control aichat-courier-type">
+                          <option value="speedy">Speedy (API)</option>
+                          <option value="link" selected="selected">{{ text_type_link }}</option>
+                        </select></div>
+                      <div class="col-sm-5"><label>{{ entry_courier_hosts }}</label><input type="text" name="couriers[__I__][hosts]" value="" class="form-control" placeholder="speedy.bg, www.speedy.bg" /></div>
+                    </div>
+                    <div class="row">
+                      <div class="col-sm-12"><label>{{ entry_courier_url }}</label><input type="text" name="couriers[__I__][track_url]" value="" class="form-control" placeholder="https://example.com/track?number={number}" /></div>
+                    </div>
+                    <div class="row aichat-courier-secret">
+                      <div class="col-sm-4"><label>{{ entry_courier_user }}</label><input type="text" name="courier_secret[__I__][username]" value="" class="form-control" autocomplete="off" /></div>
+                      <div class="col-sm-4"><label>{{ entry_courier_pass }}</label><input type="password" name="courier_secret[__I__][password]" value="" class="form-control" autocomplete="new-password" /></div>
+                      <div class="col-sm-4"><p class="help-block">{{ help_courier_secret }}</p></div>
+                    </div>
+                  </div>
                 </div>
-                <label class="col-sm-2 control-label" for="input-s{{ sid }}-olb">{{ entry_order_link_button }}</label>
-                <div class="col-sm-4">
-                  <select name="s[{{ sid }}][s_order_link_button]" id="input-s{{ sid }}-olb" class="form-control">
-                    <option value="1"{% if s.s_order_link_button %} selected="selected"{% endif %}>{{ text_enabled }}</option>
-                    <option value="0"{% if not s.s_order_link_button %} selected="selected"{% endif %}>{{ text_disabled }}</option>
-                  </select>
-                </div>
-              </div>
+              </template>
+            </div>
 
-              <fieldset>
-                <legend>{{ text_contacts }}</legend>
+            <!-- ============ ASSISTANT (per store) ============ -->
+            <div class="tab-pane" id="tab-assistant">
+              {% for store in stores %}{% set sid = store.store_id %}{% set s = store.s %}
+              <div class="aichat-store" data-store="{{ sid }}">
                 <div class="form-group">
-                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-phone">{{ entry_phone }}</label>
-                  <div class="col-sm-4"><input type="text" name="s[{{ sid }}][s_contacts][phone]" value="{{ s.s_contacts.phone }}" id="input-s{{ sid }}-phone" class="form-control" /></div>
-                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-email">{{ entry_email }}</label>
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-status">{{ entry_status }}</label>
                   <div class="col-sm-4">
-                    <input type="text" name="s[{{ sid }}][s_contacts][email]" value="{{ s.s_contacts.email }}" id="input-s{{ sid }}-email" class="form-control" />
-                    {% if errors[p ~ 'email'] %}<div class="text-danger">{{ errors[p ~ 'email'] }}</div>{% endif %}
+                    <select name="s[{{ sid }}][s_status]" id="input-s{{ sid }}-status" class="form-control">
+                      <option value="1"{% if s.s_status %} selected="selected"{% endif %}>{{ text_enabled }}</option>
+                      <option value="0"{% if not s.s_status %} selected="selected"{% endif %}>{{ text_disabled }}</option>
+                    </select>
+                  </div>
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-name">{{ entry_bot_name }}</label>
+                  <div class="col-sm-4"><input type="text" name="s[{{ sid }}][s_bot_name]" value="{{ s.s_bot_name|e('html_attr') }}" id="input-s{{ sid }}-name" class="form-control" />
+                    <div class="help-block">{{ help_bot_name }}</div></div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-2 control-label">{{ entry_avatar }}</label>
+                  <div class="col-sm-10">
+                    <div class="aichat-avatars">
+                      {% for a in avatars %}
+                      <label class="aichat-avatar" title="{{ a.name|e('html_attr') }}">
+                        <input type="radio" name="s[{{ sid }}][s_avatar]" value="{{ a.id|e('html_attr') }}"{% if s.s_avatar == a.id %} checked="checked"{% endif %} />
+                        <span class="aichat-avatar-box"><img src="{{ avatar_base ~ a.id }}.svg" alt="" loading="lazy" onerror="this.style.visibility='hidden'" /></span>
+                        <span class="aichat-avatar-name">{{ a.name|e }}</span>
+                      </label>
+                      {% endfor %}
+                    </div>
+                    <div class="help-block">{{ help_avatar }}</div>
+                  </div>
+                </div>
+
+                <fieldset>
+                  <legend>{{ text_greeting }}</legend>
+                  <div class="help-block aichat-legend-help">{{ help_greeting }}</div>
+                  {% for language in languages %}
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-greeting-{{ language.language_id }}">{{ language.name|e }}</label>
+                    <div class="col-sm-10"><textarea name="s[{{ sid }}][s_greeting][{{ language.language_id }}]" rows="2" id="input-s{{ sid }}-greeting-{{ language.language_id }}" class="form-control" data-default="{{ factory.s_greeting[language.language_id]|e('html_attr') }}">{{ s.s_greeting[language.language_id]|e }}</textarea></div>
+                  </div>
+                  {% endfor %}
+                </fieldset>
+
+                <fieldset>
+                  <legend>{{ text_welcome_back }}</legend>
+                  <div class="help-block aichat-legend-help">{{ help_welcome_back }}</div>
+                  {% for language in languages %}
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label">{{ language.name|e }}</label>
+                    <div class="col-sm-10"><input type="text" name="s[{{ sid }}][s_welcome_back][{{ language.language_id }}]" value="{{ s.s_welcome_back[language.language_id]|e('html_attr') }}" class="form-control" data-default="{{ factory.s_welcome_back[language.language_id]|e('html_attr') }}" /></div>
+                  </div>
+                  {% endfor %}
+                </fieldset>
+
+                <fieldset>
+                  <legend>{{ text_quick_replies }}</legend>
+                  <div class="help-block aichat-legend-help">{{ help_quick_replies }}</div>
+                  {% for language in languages %}
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label">{{ language.name|e }}</label>
+                    <div class="col-sm-10"><textarea name="s[{{ sid }}][s_quick_replies][{{ language.language_id }}]" rows="3" class="form-control" data-default="{{ factory.s_quick_replies[language.language_id]|e('html_attr') }}">{{ s.s_quick_replies[language.language_id]|e }}</textarea></div>
+                  </div>
+                  {% endfor %}
+                </fieldset>
+
+                <div class="form-group">
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-instructions">{{ entry_store_instructions }}</label>
+                  <div class="col-sm-10"><textarea name="s[{{ sid }}][s_instructions]" rows="5" id="input-s{{ sid }}-instructions" class="form-control">{{ s.s_instructions|e }}</textarea>
+                    <div class="help-block">{{ help_store_instructions }}</div></div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-emoji">{{ entry_emoji }}</label>
+                  <div class="col-sm-4">
+                    <select name="s[{{ sid }}][s_emoji]" id="input-s{{ sid }}-emoji" class="form-control" data-default="1">
+                      <option value="0"{% if s.s_emoji == 0 %} selected="selected"{% endif %}>{{ text_none }}</option>
+                      <option value="1"{% if s.s_emoji == 1 %} selected="selected"{% endif %}>{{ text_moderate }}</option>
+                      <option value="2"{% if s.s_emoji == 2 %} selected="selected"{% endif %}>{{ text_lots }}</option>
+                    </select>
+                  </div>
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-resume">{{ entry_resume_days }}</label>
+                  <div class="col-sm-4">
+                    <input type="text" name="s[{{ sid }}][s_resume_days]" value="{{ s.s_resume_days|e('html_attr') }}" id="input-s{{ sid }}-resume" class="form-control" data-default="7" />
+                    {% if errors['s_' ~ sid ~ '_s_resume_days'] %}<div class="text-danger aichat-err">{{ errors['s_' ~ sid ~ '_s_resume_days'] }}</div>{% endif %}
+                    <div class="help-block">{{ help_resume_days }}</div>
+                  </div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+
+            <!-- ============ APPEARANCE (per store) ============ -->
+            <div class="tab-pane" id="tab-appearance">
+              {% for store in stores %}{% set sid = store.store_id %}{% set s = store.s %}{% set p = 's_' ~ sid ~ '_' %}
+              <div class="aichat-store aichat-appearance" data-store="{{ sid }}">
+                <div class="row">
+                  <div class="col-md-7 aichat-appearance-form">
+                    <fieldset>
+                      <legend>{{ text_colors }} <button type="button" class="btn btn-link btn-xs aichat-reset-appearance"><i class="fa fa-undo"></i> {{ button_reset_defaults }}</button></legend>
+                      {% for k, label in {'s_color_accent': entry_color_accent, 's_color_header_bg': entry_color_header_bg, 's_color_header_text': entry_color_header_text, 's_color_user_bg': entry_color_user_bg, 's_color_user_text': entry_color_user_text} %}
+                      <div class="form-group">
+                        <label class="col-sm-4 control-label">{{ label }}</label>
+                        <div class="col-sm-8">
+                          <div class="aichat-colorrow">
+                            <input type="color" class="aichat-colorpick" value="{{ attribute(s, k)|e('html_attr') }}" />
+                            <input type="text" name="s[{{ sid }}][{{ k }}]" value="{{ attribute(s, k)|e('html_attr') }}" class="form-control aichat-colortext" maxlength="7" data-default="{{ attribute(factory, k) }}" data-pv="{{ k }}" />
+                          </div>
+                        </div>
+                      </div>
+                      {% endfor %}
+                      <div class="help-block">{{ help_colors }}</div>
+                    </fieldset>
+
+                    <fieldset>
+                      <legend>{{ text_launcher }}</legend>
+                      <div class="form-group">
+                        <label class="col-sm-4 control-label">{{ entry_launcher_style }}</label>
+                        <div class="col-sm-8">
+                          <select name="s[{{ sid }}][s_launcher_style]" class="form-control" data-default="avatar" data-pv="s_launcher_style">
+                            <option value="avatar"{% if s.s_launcher_style == 'avatar' %} selected="selected"{% endif %}>{{ text_style_avatar }}</option>
+                            <option value="avatar_text"{% if s.s_launcher_style == 'avatar_text' %} selected="selected"{% endif %}>{{ text_style_avatar_text }}</option>
+                          </select>
+                        </div>
+                      </div>
+                      {% for language in languages %}
+                      <div class="form-group">
+                        <label class="col-sm-4 control-label">{{ entry_launcher_text }} ({{ language.code }})</label>
+                        <div class="col-sm-8"><input type="text" name="s[{{ sid }}][s_launcher_text][{{ language.language_id }}]" value="{{ s.s_launcher_text[language.language_id]|e('html_attr') }}" class="form-control aichat-launcher-text" data-default="" data-pv="s_launcher_text" placeholder="{{ text_launcher_text_default }}" /></div>
+                      </div>
+                      {% endfor %}
+                      <div class="form-group">
+                        <label class="col-sm-4 control-label">{{ entry_launcher_shape }}</label>
+                        <div class="col-sm-8">
+                          <select name="s[{{ sid }}][s_launcher_shape]" class="form-control" data-default="circle" data-pv="s_launcher_shape">
+                            <option value="circle"{% if s.s_launcher_shape == 'circle' %} selected="selected"{% endif %}>{{ text_shape_circle }}</option>
+                            <option value="rounded"{% if s.s_launcher_shape == 'rounded' %} selected="selected"{% endif %}>{{ text_shape_rounded }}</option>
+                            <option value="pill"{% if s.s_launcher_shape == 'pill' %} selected="selected"{% endif %}>{{ text_shape_pill }}</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div class="form-group">
+                        <label class="col-sm-4 control-label">{{ entry_launcher_size }}</label>
+                        <div class="col-sm-3"><div class="input-group"><input type="text" name="s[{{ sid }}][s_launcher_size]" value="{{ s.s_launcher_size|e('html_attr') }}" class="form-control" data-default="56" data-pv="s_launcher_size" /><span class="input-group-addon">px</span></div>
+                          {% if errors[p ~ 's_launcher_size'] %}<div class="text-danger aichat-err">{{ errors[p ~ 's_launcher_size'] }}</div>{% endif %}</div>
+                        <label class="col-sm-2 control-label">{{ entry_launcher_avatar_size }}</label>
+                        <div class="col-sm-3"><div class="input-group"><input type="text" name="s[{{ sid }}][s_launcher_avatar_size]" value="{{ s.s_launcher_avatar_size|e('html_attr') }}" class="form-control" data-default="{{ factory.s_launcher_avatar_size }}" data-pv="s_launcher_avatar_size" /><span class="input-group-addon">px</span></div>
+                          {% if errors[p ~ 's_launcher_avatar_size'] %}<div class="text-danger aichat-err">{{ errors[p ~ 's_launcher_avatar_size'] }}</div>{% endif %}</div>
+                        <div class="col-sm-offset-4 col-sm-8"><div class="help-block">{{ help_launcher_size }}</div></div>
+                      </div>
+                    </fieldset>
+
+                    <fieldset>
+                      <legend>{{ text_position }}</legend>
+                      {% for dev in ['desktop', 'mobile'] %}
+                      <div class="form-group">
+                        <label class="col-sm-4 control-label">{{ dev == 'desktop' ? entry_pos_desktop : entry_pos_mobile }}</label>
+                        <div class="col-sm-3">
+                          <select name="s[{{ sid }}][s_pos_{{ dev }}_side]" class="form-control" data-default="right" data-pv="s_pos_{{ dev }}_side">
+                            <option value="right"{% if attribute(s, 's_pos_' ~ dev ~ '_side') == 'right' %} selected="selected"{% endif %}>{{ text_right }}</option>
+                            <option value="left"{% if attribute(s, 's_pos_' ~ dev ~ '_side') == 'left' %} selected="selected"{% endif %}>{{ text_left }}</option>
+                          </select>
+                        </div>
+                        <div class="col-sm-2"><div class="input-group"><span class="input-group-addon">X</span><input type="text" name="s[{{ sid }}][s_pos_{{ dev }}_x]" value="{{ attribute(s, 's_pos_' ~ dev ~ '_x')|e('html_attr') }}" class="form-control" data-default="20" data-pv="s_pos_{{ dev }}_x" /></div></div>
+                        <div class="col-sm-2"><div class="input-group"><span class="input-group-addon">Y</span><input type="text" name="s[{{ sid }}][s_pos_{{ dev }}_y]" value="{{ attribute(s, 's_pos_' ~ dev ~ '_y')|e('html_attr') }}" class="form-control" data-default="20" data-pv="s_pos_{{ dev }}_y" /></div></div>
+                        {% if errors[p ~ 's_pos_' ~ dev ~ '_x'] or errors[p ~ 's_pos_' ~ dev ~ '_y'] %}<div class="col-sm-offset-4 col-sm-8 text-danger aichat-err">{{ errors[p ~ 's_pos_' ~ dev ~ '_x'] }} {{ errors[p ~ 's_pos_' ~ dev ~ '_y'] }}</div>{% endif %}
+                      </div>
+                      {% endfor %}
+                      <div class="help-block">{{ help_position }}</div>
+                      <div class="form-group">
+                        <label class="col-sm-4 control-label">z-index</label>
+                        <div class="col-sm-3"><input type="text" name="s[{{ sid }}][s_zindex]" value="{{ s.s_zindex|e('html_attr') }}" class="form-control" data-default="{{ factory.s_zindex }}" />
+                          {% if errors[p ~ 's_zindex'] %}<div class="text-danger aichat-err">{{ errors[p ~ 's_zindex'] }}</div>{% endif %}</div>
+                        <div class="col-sm-5"><div class="help-block">{{ help_zindex }}</div></div>
+                      </div>
+                    </fieldset>
+
+                    <fieldset>
+                      <legend>{{ text_custom_css }}</legend>
+                      <textarea name="s[{{ sid }}][s_custom_css]" rows="4" class="form-control aichat-mono" data-default="" placeholder="#aichat-root .aichat-launcher { box-shadow: none; }">{{ s.s_custom_css|e }}</textarea>
+                      <div class="help-block">{{ help_custom_css }}</div>
+                    </fieldset>
+                  </div>
+
+                  <div class="col-md-5">
+                    <div class="aichat-preview" data-store="{{ sid }}">
+                      <h4>{{ text_preview }}</h4>
+                      <div class="aichat-pv-panel">
+                        <div class="aichat-pv-head">
+                          <span class="aichat-pv-avatar"></span>
+                          <span class="aichat-pv-title"><strong class="aichat-pv-name">{{ s.s_bot_name|e }}</strong><small>{{ text_preview_sub }}</small></span>
+                          <span class="aichat-pv-x">&times;</span>
+                        </div>
+                        <div class="aichat-pv-body">
+                          <div class="aichat-pv-bot">{{ text_preview_bot }}</div>
+                          <div class="aichat-pv-user">{{ text_preview_user }}</div>
+                          <div class="aichat-pv-chip">{{ text_preview_chip }}</div>
+                        </div>
+                      </div>
+                      <div class="aichat-pv-devices btn-group btn-group-sm">
+                        <button type="button" class="btn btn-default active" data-dev="desktop"><i class="fa fa-desktop"></i> {{ text_desktop }}</button>
+                        <button type="button" class="btn btn-default" data-dev="mobile"><i class="fa fa-mobile"></i> {{ text_mobile }}</button>
+                      </div>
+                      <div class="aichat-pv-frame is-desktop"><div class="aichat-pv-launcher"><span class="aichat-pv-lav"></span><span class="aichat-pv-ltext"></span></div></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+
+            <!-- ============ CONTACTS & HOURS (per store) ============ -->
+            <div class="tab-pane" id="tab-contacts">
+              {% for store in stores %}{% set sid = store.store_id %}{% set s = store.s %}{% set p = 's_' ~ sid ~ '_' %}
+              <div class="aichat-store" data-store="{{ sid }}">
+                <fieldset>
+                  <legend>{{ text_contacts }}</legend>
+                  <div class="help-block aichat-legend-help">{{ help_contacts }}</div>
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-phone">{{ entry_phone }}</label>
+                    <div class="col-sm-4"><input type="text" name="s[{{ sid }}][s_contacts][phone]" value="{{ s.s_contacts.phone|e('html_attr') }}" id="input-s{{ sid }}-phone" class="form-control" /></div>
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-email">{{ entry_email }}</label>
+                    <div class="col-sm-4">
+                      <input type="text" name="s[{{ sid }}][s_contacts][email]" value="{{ s.s_contacts.email|e('html_attr') }}" id="input-s{{ sid }}-email" class="form-control" />
+                      {% if errors[p ~ 'email'] %}<div class="text-danger aichat-err">{{ errors[p ~ 'email'] }}</div>{% endif %}
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-viber">{{ entry_viber }}</label>
+                    <div class="col-sm-4"><input type="text" name="s[{{ sid }}][s_contacts][viber]" value="{{ s.s_contacts.viber|e('html_attr') }}" id="input-s{{ sid }}-viber" class="form-control" /></div>
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-whatsapp">{{ entry_whatsapp }}</label>
+                    <div class="col-sm-4"><input type="text" name="s[{{ sid }}][s_contacts][whatsapp]" value="{{ s.s_contacts.whatsapp|e('html_attr') }}" id="input-s{{ sid }}-whatsapp" class="form-control" /></div>
+                  </div>
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-note">{{ entry_note }}</label>
+                    <div class="col-sm-10"><textarea name="s[{{ sid }}][s_contacts][note]" rows="2" id="input-s{{ sid }}-note" class="form-control">{{ s.s_contacts.note|e }}</textarea>
+                      <div class="help-block">{{ help_contact_note }}</div></div>
+                  </div>
+                </fieldset>
+                <fieldset>
+                  <legend>{{ text_work_hours }}</legend>
+                  <p class="text-muted">{{ text_work_hours_help }}</p>
+                  {% if errors[p ~ 'hours'] %}<div class="text-danger aichat-err">{{ errors[p ~ 'hours'] }}</div>{% endif %}
+                  {% for d in days %}
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label">{{ attribute(_context, 'text_day_' ~ d) }}</label>
+                    <div class="col-sm-2"><input type="text" name="s[{{ sid }}][s_work_hours][{{ d }}][from]" value="{{ s.s_work_hours[d].from|e('html_attr') }}" placeholder="{{ text_from }} 09:00" class="form-control" maxlength="5" /></div>
+                    <div class="col-sm-2"><input type="text" name="s[{{ sid }}][s_work_hours][{{ d }}][to]" value="{{ s.s_work_hours[d].to|e('html_attr') }}" placeholder="{{ text_to }} 18:00" class="form-control" maxlength="5" /></div>
+                  </div>
+                  {% endfor %}
+                </fieldset>
+              </div>
+              {% endfor %}
+            </div>
+
+            <!-- ============ ORDERS (per store) ============ -->
+            <div class="tab-pane" id="tab-orders">
+              {% for store in stores %}{% set sid = store.store_id %}{% set s = store.s %}
+              <div class="aichat-store" data-store="{{ sid }}">
+                <div class="form-group">
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-courier">{{ entry_courier }}</label>
+                  <div class="col-sm-4">
+                    <select name="s[{{ sid }}][s_courier]" id="input-s{{ sid }}-courier" class="form-control aichat-courier-select" data-selected="{{ s.s_courier|e('html_attr') }}">
+                      <option value="">{{ text_none }}</option>
+                      {% for c in couriers %}{% if c.code %}<option value="{{ c.code|e('html_attr') }}"{% if s.s_courier == c.code %} selected="selected"{% endif %}>{{ c.name|e }}</option>{% endif %}{% endfor %}
+                    </select>
+                    <div class="help-block">{{ help_courier }}</div>
                   </div>
                 </div>
                 <div class="form-group">
-                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-viber">{{ entry_viber }}</label>
-                  <div class="col-sm-4"><input type="text" name="s[{{ sid }}][s_contacts][viber]" value="{{ s.s_contacts.viber }}" id="input-s{{ sid }}-viber" class="form-control" /></div>
-                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-whatsapp">{{ entry_whatsapp }}</label>
-                  <div class="col-sm-4"><input type="text" name="s[{{ sid }}][s_contacts][whatsapp]" value="{{ s.s_contacts.whatsapp }}" id="input-s{{ sid }}-whatsapp" class="form-control" /></div>
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-olb">{{ entry_order_link_button }}</label>
+                  <div class="col-sm-4">
+                    <select name="s[{{ sid }}][s_order_link_button]" id="input-s{{ sid }}-olb" class="form-control">
+                      <option value="1"{% if s.s_order_link_button %} selected="selected"{% endif %}>{{ text_enabled }}</option>
+                      <option value="0"{% if not s.s_order_link_button %} selected="selected"{% endif %}>{{ text_disabled }}</option>
+                    </select>
+                    <div class="help-block">{{ help_order_link }}</div>
+                  </div>
                 </div>
-                <div class="form-group">
-                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-note">{{ entry_note }}</label>
-                  <div class="col-sm-10"><textarea name="s[{{ sid }}][s_contacts][note]" rows="2" id="input-s{{ sid }}-note" class="form-control">{{ s.s_contacts.note }}</textarea></div>
-                </div>
-              </fieldset>
+              </div>
+              {% endfor %}
+            </div>
 
-              <fieldset>
-                <legend>{{ text_work_hours }}</legend>
-                <p class="text-muted">{{ text_work_hours_help }}</p>
-                {% if errors[p ~ 'hours'] %}<div class="text-danger">{{ errors[p ~ 'hours'] }}</div>{% endif %}
-                {% for d in days %}
-                <div class="form-group">
-                  <label class="col-sm-2 control-label">{{ attribute(_context, 'text_day_' ~ d) }}</label>
-                  <div class="col-sm-2"><input type="text" name="s[{{ sid }}][s_work_hours][{{ d }}][from]" value="{{ s.s_work_hours[d].from }}" placeholder="{{ text_from }} 09:00" class="form-control" maxlength="5" /></div>
-                  <div class="col-sm-2"><input type="text" name="s[{{ sid }}][s_work_hours][{{ d }}][to]" value="{{ s.s_work_hours[d].to }}" placeholder="{{ text_to }} 18:00" class="form-control" maxlength="5" /></div>
-                </div>
-                {% endfor %}
-              </fieldset>
-
-              <fieldset>
-                <legend>{{ text_limits }}</legend>
+            <!-- ============ LIMITS (per store) ============ -->
+            <div class="tab-pane" id="tab-limits">
+              {% for store in stores %}{% set sid = store.store_id %}{% set s = store.s %}{% set p = 's_' ~ sid ~ '_' %}
+              <div class="aichat-store" data-store="{{ sid }}">
                 <div class="form-group">
                   <label class="col-sm-2 control-label" for="input-s{{ sid }}-budget">{{ entry_budget_month }}</label>
                   <div class="col-sm-4">
-                    <div class="input-group"><input type="text" name="s[{{ sid }}][s_budget_month]" value="{{ s.s_budget_month }}" id="input-s{{ sid }}-budget" class="form-control" /><span class="input-group-addon">USD</span></div>
-                    {% if errors[p ~ 's_budget_month'] %}<div class="text-danger">{{ errors[p ~ 's_budget_month'] }}</div>{% endif %}
+                    <div class="input-group"><input type="text" name="s[{{ sid }}][s_budget_month]" value="{{ s.s_budget_month|e('html_attr') }}" id="input-s{{ sid }}-budget" class="form-control" /><span class="input-group-addon">USD</span></div>
+                    {% if errors[p ~ 's_budget_month'] %}<div class="text-danger aichat-err">{{ errors[p ~ 's_budget_month'] }}</div>{% endif %}
+                    <div class="help-block">{{ help_store_budget }}</div>
                   </div>
                   <label class="col-sm-2 control-label" for="input-s{{ sid }}-mcd">{{ entry_max_chats_day }}</label>
                   <div class="col-sm-4">
-                    <input type="text" name="s[{{ sid }}][s_max_chats_day]" value="{{ s.s_max_chats_day }}" id="input-s{{ sid }}-mcd" class="form-control" />
-                    {% if errors[p ~ 's_max_chats_day'] %}<div class="text-danger">{{ errors[p ~ 's_max_chats_day'] }}</div>{% endif %}
+                    <input type="text" name="s[{{ sid }}][s_max_chats_day]" value="{{ s.s_max_chats_day|e('html_attr') }}" id="input-s{{ sid }}-mcd" class="form-control" />
+                    {% if errors[p ~ 's_max_chats_day'] %}<div class="text-danger aichat-err">{{ errors[p ~ 's_max_chats_day'] }}</div>{% endif %}
+                    <div class="help-block">{{ help_max_chats_day }}</div>
                   </div>
                 </div>
                 <div class="form-group">
                   <label class="col-sm-2 control-label" for="input-s{{ sid }}-mmc">{{ entry_max_msgs_chat }}</label>
                   <div class="col-sm-4">
-                    <input type="text" name="s[{{ sid }}][s_max_msgs_chat]" value="{{ s.s_max_msgs_chat }}" id="input-s{{ sid }}-mmc" class="form-control" />
-                    {% if errors[p ~ 's_max_msgs_chat'] %}<div class="text-danger">{{ errors[p ~ 's_max_msgs_chat'] }}</div>{% endif %}
+                    <input type="text" name="s[{{ sid }}][s_max_msgs_chat]" value="{{ s.s_max_msgs_chat|e('html_attr') }}" id="input-s{{ sid }}-mmc" class="form-control" data-default="40" />
+                    {% if errors[p ~ 's_max_msgs_chat'] %}<div class="text-danger aichat-err">{{ errors[p ~ 's_max_msgs_chat'] }}</div>{% endif %}
                   </div>
                   <label class="col-sm-2 control-label" for="input-s{{ sid }}-mmm">{{ entry_max_msgs_minute }}</label>
                   <div class="col-sm-4">
-                    <input type="text" name="s[{{ sid }}][s_max_msgs_minute]" value="{{ s.s_max_msgs_minute }}" id="input-s{{ sid }}-mmm" class="form-control" />
-                    {% if errors[p ~ 's_max_msgs_minute'] %}<div class="text-danger">{{ errors[p ~ 's_max_msgs_minute'] }}</div>{% endif %}
+                    <input type="text" name="s[{{ sid }}][s_max_msgs_minute]" value="{{ s.s_max_msgs_minute|e('html_attr') }}" id="input-s{{ sid }}-mmm" class="form-control" data-default="6" />
+                    {% if errors[p ~ 's_max_msgs_minute'] %}<div class="text-danger aichat-err">{{ errors[p ~ 's_max_msgs_minute'] }}</div>{% endif %}
                   </div>
                 </div>
                 <div class="form-group">
                   <label class="col-sm-2 control-label" for="input-s{{ sid }}-ml">{{ entry_max_len }}</label>
                   <div class="col-sm-4">
-                    <input type="text" name="s[{{ sid }}][s_max_len]" value="{{ s.s_max_len }}" id="input-s{{ sid }}-ml" class="form-control" />
-                    {% if errors[p ~ 's_max_len'] %}<div class="text-danger">{{ errors[p ~ 's_max_len'] }}</div>{% endif %}
+                    <input type="text" name="s[{{ sid }}][s_max_len]" value="{{ s.s_max_len|e('html_attr') }}" id="input-s{{ sid }}-ml" class="form-control" data-default="1000" />
+                    {% if errors[p ~ 's_max_len'] %}<div class="text-danger aichat-err">{{ errors[p ~ 's_max_len'] }}</div>{% endif %}
+                    <div class="help-block">{{ help_max_len }}</div>
                   </div>
                 </div>
-              </fieldset>
+              </div>
+              {% endfor %}
             </div>
-            {% endfor %}
 
           </div>
-        </form>
       </div>
     </div>
+    </form>
   </div>
 </div>
 {{ footer }}

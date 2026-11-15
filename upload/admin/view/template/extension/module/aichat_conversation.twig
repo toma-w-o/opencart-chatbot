@@ -1,0 +1,114 @@
+{{ header }}{{ column_left }}
+<div id="content" class="aichat-admin">
+  <div class="page-header">
+    <div class="container-fluid">
+      <div class="pull-right"><a href="{{ back }}" class="btn btn-default"><i class="fa fa-reply"></i> {{ button_back }}</a></div>
+      <h1>{{ text_transcript }} #{{ conv.id }}</h1>
+      <ul class="breadcrumb">
+        {% for breadcrumb in breadcrumbs %}
+        <li><a href="{{ breadcrumb.href }}">{{ breadcrumb.text }}</a></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="container-fluid">
+    {{ subnav }}
+    <div class="row">
+      <div class="col-md-8">
+        <div class="aichat-thread">
+          {% for m in messages %}
+          <div class="aichat-msg aichat-msg-{{ m.role }}{% if m.flagged %} is-flagged{% endif %}" data-message="{{ m.id }}">
+            <div class="aichat-msg-head">
+              <strong>{% if m.role == 'user' %}{{ text_role_user }}{% elseif m.role == 'assistant' %}{{ text_role_bot }}{% elseif m.role == 'staff' %}{{ text_role_staff }}{% else %}{{ text_role_system }}{% endif %}</strong>
+              <span class="aichat-muted">{{ m.date }}</span>
+              {% if m.role == 'assistant' and can_modify %}<button type="button" class="btn btn-xs aichat-flag-btn {{ m.flagged ? 'btn-danger' : 'btn-default' }} pull-right" title="{{ text_flag_hint }}"><i class="fa fa-flag"></i> {{ text_bad_answer }}</button>{% endif %}
+            </div>
+            <div class="aichat-bubble">{{ m.content|e|nl2br }}</div>
+
+            {% if m.page_type or m.url %}
+            <div class="aichat-ctx"><i class="fa fa-map-marker"></i> {{ text_page_context }}:
+              {% if m.page_type %}<b>{{ m.page_type|e }}</b>{% if m.page_title %} &ldquo;{{ m.page_title|e }}&rdquo;{% endif %}{% if m.page_id %} (id {{ m.page_id|e }}){% endif %}{% endif %}
+              {% if m.url %}<a href="{{ m.url|e('html_attr') }}" target="_blank" rel="noopener" class="aichat-url">{{ m.url|e }}</a>{% endif %}
+            </div>
+            {% endif %}
+
+            {% if m.products %}
+            <div class="aichat-cards">
+              {% for p in m.products %}<span class="aichat-card-chip{% if p.label == 'suggestion' %} is-suggestion{% endif %}"><i class="fa fa-cube"></i> {{ p.name|e }}{% if p.id %} <small>#{{ p.id }}</small>{% endif %}{% if p.label == 'suggestion' %} <small>({{ text_suggestion }})</small>{% endif %}</span>{% endfor %}
+            </div>
+            {% endif %}
+            {% if m.cards %}
+            <div class="aichat-cards">
+              {% for c in m.cards %}<span class="aichat-card-chip is-link"><i class="fa fa-link"></i> {% if c.type %}<small>{{ c.type|e }}</small> {% endif %}{% if c.href %}<a href="{{ c.href|e('html_attr') }}" target="_blank" rel="noopener">{{ c.title|e }}</a>{% else %}{{ c.title|e }}{% endif %}</span>{% endfor %}
+            </div>
+            {% endif %}
+
+            {% if m.tools %}
+            <div class="aichat-tools">
+              <a data-toggle="collapse" href="#tools-{{ m.id }}" class="aichat-tools-toggle"><i class="fa fa-wrench"></i> {{ text_tool_calls }} ({{ m.tools|length }}) <i class="fa fa-caret-down"></i></a>
+              <div id="tools-{{ m.id }}" class="collapse">
+                {% for t in m.tools %}<div class="aichat-tool{% if t.error %} is-error{% endif %}"><code>{{ t.name|e }}</code> <span class="aichat-mono">{{ t.input|e }}</span></div>{% endfor %}
+              </div>
+            </div>
+            {% endif %}
+            {% if m.error %}<div class="aichat-ctx text-danger"><i class="fa fa-exclamation-triangle"></i> {{ m.error|e }}</div>{% endif %}
+
+            {% if m.tokens_in or m.tokens_out or m.cost %}
+            <div class="aichat-usage">{{ m.tokens_in }} {{ text_in }} &middot; {{ m.tokens_out }} {{ text_out }}{% if m.cost %} &middot; {{ m.cost }}{% endif %}{% if m.model %} &middot; {{ m.model|e }}{% endif %}</div>
+            {% endif %}
+
+            <div class="aichat-flag-note alert alert-danger"{% if not (m.flagged and m.flag_note) %} style="display:none"{% endif %}>{{ m.flag_note|e }}</div>
+            {% if m.role == 'assistant' and can_modify %}
+            <div class="aichat-flag-form" style="display:none">
+              <textarea rows="2" class="form-control" placeholder="{{ text_flag_note_hint }}">{{ m.flag_note|e }}</textarea>
+              <div style="margin-top:6px">
+                <button type="button" class="btn btn-danger btn-sm aichat-flag-save" data-flag="1"><i class="fa fa-flag"></i> {{ button_flag }}</button>
+                <button type="button" class="btn btn-default btn-sm aichat-flag-save aichat-flag-clear" data-flag="0"{% if not m.flagged %} style="display:none"{% endif %}>{{ button_unflag }}</button>
+              </div>
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+          {% if not messages %}<p class="text-muted">{{ text_no_results }}</p>{% endif %}
+        </div>
+      </div>
+
+      <div class="col-md-4">
+        <div class="panel panel-default aichat-card aichat-side">
+          <div class="panel-body">
+            <h4>{{ text_conversation }}</h4>
+            <dl class="aichat-dl">
+              <dt>{{ text_store }}</dt><dd>{{ conv.store|e }}</dd>
+              <dt>{{ text_language }}</dt><dd>{{ conv.language|e }}</dd>
+              <dt>{{ text_customer }}</dt><dd>{{ conv.customer|e }}</dd>
+              <dt>{{ text_date }}</dt><dd>{{ conv.date }}<br /><span class="aichat-muted">{{ conv.modified }}</span></dd>
+              <dt>{{ text_status }}</dt><dd>{{ conv.mode|e }}</dd>
+              <dt>{{ text_order }}</dt><dd>{% if conv.order %}#{{ conv.order }}{% else %}-{% endif %} {% if conv.attempts %}<span class="aichat-muted">({{ text_attempts }}: {{ conv.attempts }})</span>{% endif %}</dd>
+              <dt>{{ text_messages }}</dt><dd>{{ conv.messages }}</dd>
+              <dt>{{ text_tokens }}</dt><dd>{{ conv.tokens_in }} {{ text_in }} / {{ conv.tokens_out }} {{ text_out }}</dd>
+              <dt>{{ text_cost }}</dt><dd><b>{{ conv.cost }}</b></dd>
+              <dt>IP</dt><dd>{{ conv.ip|e }}</dd>
+              <dt>{{ text_browser }}</dt><dd class="aichat-small">{{ conv.ua|e }}</dd>
+              {% if conv.first_url %}<dt>{{ text_first_page }}</dt><dd class="aichat-small"><a href="{{ conv.first_url|e('html_attr') }}" target="_blank" rel="noopener">{{ conv.first_url|e }}</a></dd>{% endif %}
+            </dl>
+            <div data-conversation="{{ conv.id }}" data-message="0" class="aichat-convflag{% if conv.flagged %} is-flagged{% endif %}">
+              <button type="button" class="btn btn-sm aichat-flag-btn {{ conv.flagged ? 'btn-danger' : 'btn-default' }}"><i class="fa fa-flag"></i> {{ text_flag_conversation }}</button>
+              <div class="aichat-flag-note alert alert-danger" style="margin-top:8px;{% if not (conv.flagged and conv.note) %}display:none{% endif %}">{{ conv.note|e }}</div>
+              {% if can_modify %}
+              <div class="aichat-flag-form" style="display:none;margin-top:8px">
+                <textarea rows="3" class="form-control" placeholder="{{ text_flag_note_hint }}">{{ conv.note|e }}</textarea>
+                <div style="margin-top:6px">
+                  <button type="button" class="btn btn-danger btn-sm aichat-flag-save" data-flag="1">{{ button_flag }}</button>
+                  <button type="button" class="btn btn-default btn-sm aichat-flag-save aichat-flag-clear" data-flag="0"{% if not conv.flagged %} style="display:none"{% endif %}>{{ button_unflag }}</button>
+                </div>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>window.AICHAT_FLAG = {url: {{ flag_url|json_encode }}, token: {{ user_token|json_encode }}};</script>
+{{ footer }}
