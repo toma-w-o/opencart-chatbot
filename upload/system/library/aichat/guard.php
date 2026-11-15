@@ -73,9 +73,9 @@ class Guard {
 		return hash_equals(self::previewSig((int)$m[1], $this->settings->getSecret()), $m[2]) ? (int)$m[1] : 0;
 	}
 
-	/** The test conversation of a preview has a fixed public_id derived from it. */
-	public function previewPublicId($previewId) {
-		return substr(hash_hmac('sha256', 'aichat|preview-conv|' . (int)$previewId, $this->settings->getSecret()), 0, 32);
+	/** The test conversation of a preview has a fixed public_id derived from it (id + creation time: ids may be reused after a reinstall). */
+	public function previewPublicId($previewId, $created = '') {
+		return substr(hash_hmac('sha256', 'aichat|preview-conv|' . (int)$previewId . '|' . $created, $this->settings->getSecret()), 0, 32);
 	}
 
 	private static function previewSig($previewId, $secret) {

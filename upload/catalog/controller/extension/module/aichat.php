@@ -329,7 +329,7 @@ class ControllerExtensionModuleAichat extends Controller {
 				return;
 			}
 
-			$publicId = $guard->previewPublicId($previewId);
+			$publicId = $guard->previewPublicId($previewId, (string)$preview['date_added']);
 		} else {
 			$publicId = $guard->parseToken(isset($input['token']) ? $input['token'] : '', $storeId);
 		}
@@ -347,7 +347,7 @@ class ControllerExtensionModuleAichat extends Controller {
 			return;
 		}
 
-		if ($conversation && !$isTest && (int)$conversation['is_test']) {
+		if ($conversation && $isTest !== (bool)(int)$conversation['is_test']) {
 			$this->fail('invalid_token');
 			return;
 		}
@@ -358,7 +358,7 @@ class ControllerExtensionModuleAichat extends Controller {
 		$imageIds = isset($input['images']) && is_array($input['images']) ? array_slice(array_values(array_filter(array_map('intval', array_filter($input['images'], 'is_numeric')))), 0, 10) : array();
 
 		// the widget sends an image-only message with the text "Photo" (or its localised string): no caption
-		if ($imageIds && in_array($message, array('Photo', $this->language->get('widget_photo')), true)) {
+		if ($imageIds && in_array($message, array('Photo', $this->language->get('widget_img_caption')), true)) {
 			$message = '';
 		}
 

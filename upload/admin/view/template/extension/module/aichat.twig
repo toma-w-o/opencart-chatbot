@@ -15,6 +15,7 @@
   </div>
   <div class="container-fluid">
     {{ subnav }}
+    {% if upgrade_pending %}<div class="alert alert-warning"><i class="fa fa-info-circle"></i> {{ text_upgrade_pending }}</div>{% endif %}
     {% if error_warning %}
     <div class="alert alert-danger alert-dismissible"><i class="fa fa-exclamation-circle"></i> {{ error_warning }}
       <button type="button" class="close" data-dismiss="alert">&times;</button>
@@ -32,10 +33,12 @@
             <li class="active"><a href="#tab-general" data-toggle="tab">{{ tab_general }}</a></li>
             <li><a href="#tab-protection" data-toggle="tab">{{ tab_protection }}</a></li>
             <li><a href="#tab-couriers" data-toggle="tab">{{ tab_couriers }}</a></li>
+            <li><a href="#tab-telegram" data-toggle="tab"><i class="fa fa-paper-plane"></i> {{ tab_telegram }}</a></li>
             <li class="aichat-tab-store"><a href="#tab-assistant" data-toggle="tab">{{ tab_assistant }}</a></li>
             <li class="aichat-tab-store"><a href="#tab-appearance" data-toggle="tab">{{ tab_appearance }}</a></li>
             <li class="aichat-tab-store"><a href="#tab-contacts" data-toggle="tab">{{ tab_contacts }}</a></li>
             <li class="aichat-tab-store"><a href="#tab-orders" data-toggle="tab">{{ tab_orders }}</a></li>
+            <li class="aichat-tab-store"><a href="#tab-behaviour" data-toggle="tab">{{ tab_behaviour }}</a></li>
             <li class="aichat-tab-store"><a href="#tab-limits" data-toggle="tab">{{ tab_limits }}</a></li>
           </ul>
 
@@ -72,6 +75,13 @@
                 </div>
               </div>
               <div class="form-group">
+                <label class="col-sm-2 control-label" for="input-g-model-light">{{ entry_model_light }}</label>
+                <div class="col-sm-4">
+                  <input type="text" name="g[g_model_light]" value="{{ g.g_model_light|e('html_attr') }}" id="input-g-model-light" class="form-control" />
+                </div>
+                <div class="col-sm-6"><div class="help-block" style="padding-top:8px">{{ help_model_light }}</div></div>
+              </div>
+              <div class="form-group">
                 <label class="col-sm-2 control-label" for="input-g-instructions">{{ entry_instructions }}</label>
                 <div class="col-sm-10">
                   <textarea name="g[g_instructions]" rows="6" id="input-g-instructions" class="form-control">{{ g.g_instructions|e }}</textarea>
@@ -90,6 +100,19 @@
                   {% if errors.g_price_out %}<div class="text-danger">{{ errors.g_price_out }}</div>{% endif %}
                 </div>
                 <div class="col-sm-offset-2 col-sm-10"><div class="help-block">{{ text_price_help }}</div></div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-2 control-label" for="input-g-price-lin">{{ entry_price_light_in }}</label>
+                <div class="col-sm-4">
+                  <div class="input-group"><input type="text" name="g[g_price_light_in]" value="{{ g.g_price_light_in|e('html_attr') }}" id="input-g-price-lin" class="form-control" /><span class="input-group-addon">USD / 1M</span></div>
+                  {% if errors.g_price_light_in %}<div class="text-danger">{{ errors.g_price_light_in }}</div>{% endif %}
+                </div>
+                <label class="col-sm-2 control-label" for="input-g-price-lout">{{ entry_price_light_out }}</label>
+                <div class="col-sm-4">
+                  <div class="input-group"><input type="text" name="g[g_price_light_out]" value="{{ g.g_price_light_out|e('html_attr') }}" id="input-g-price-lout" class="form-control" /><span class="input-group-addon">USD / 1M</span></div>
+                  {% if errors.g_price_light_out %}<div class="text-danger">{{ errors.g_price_light_out }}</div>{% endif %}
+                </div>
+                <div class="col-sm-offset-2 col-sm-10"><div class="help-block">{{ help_price_light }}</div></div>
               </div>
               <div class="form-group">
                 <label class="col-sm-2 control-label" for="input-g-budget">{{ entry_budget_month }}</label>
@@ -117,6 +140,22 @@
                 </div>
                 <div class="col-sm-offset-2 col-sm-10"><div class="help-block">{{ help_retention }}</div></div>
               </div>
+              <fieldset>
+                <legend>{{ text_weekly_report }}</legend>
+                <div class="form-group">
+                  <label class="col-sm-2 control-label">{{ entry_report_weekly }}</label>
+                  <div class="col-sm-4">
+                    <input type="hidden" name="g[g_report_weekly]" value="0" />
+                    <label class="aichat-switch"><input type="checkbox" name="g[g_report_weekly]" value="1"{% if g.g_report_weekly %} checked="checked"{% endif %} /> {{ text_enabled }}</label>
+                  </div>
+                  <label class="col-sm-2 control-label" for="input-g-report-email">{{ entry_report_email }}</label>
+                  <div class="col-sm-4">
+                    <input type="text" name="g[g_report_email]" value="{{ g.g_report_email|e('html_attr') }}" id="input-g-report-email" class="form-control" />
+                    {% if errors.g_report_email %}<div class="text-danger">{{ errors.g_report_email }}</div>{% endif %}
+                  </div>
+                  <div class="col-sm-offset-2 col-sm-10"><div class="help-block">{{ help_report }}</div></div>
+                </div>
+              </fieldset>
             </div>
 
             <!-- ============ PROTECTION ============ -->
@@ -206,6 +245,102 @@
                   </div>
                 </div>
               </template>
+            </div>
+
+            <!-- ============ TELEGRAM (global) ============ -->
+            <div class="tab-pane" id="tab-telegram">
+              <p class="text-muted">{{ text_global_note }} {{ help_telegram }}</p>
+              {% if not tg_supported %}<div class="alert alert-warning">{{ text_tg_unavailable }}</div>{% endif %}
+
+              <div class="panel panel-default aichat-howto">
+                <div class="panel-heading"><a data-toggle="collapse" href="#aichat-tg-howto"><i class="fa fa-question-circle"></i> {{ text_tg_howto_title }} <i class="fa fa-caret-down"></i></a></div>
+                <div id="aichat-tg-howto" class="panel-collapse collapse in">
+                  <div class="panel-body">
+                    <ol class="aichat-steps">
+                      <li>{{ text_tg_step1 }}</li>
+                      <li>{{ text_tg_step2 }}</li>
+                      <li>{{ text_tg_step3 }}</li>
+                      <li>{{ text_tg_step4 }}</li>
+                      <li>{{ text_tg_step5 }}</li>
+                      <li>{{ text_tg_step6 }}</li>
+                      <li>{{ text_tg_step7 }}</li>
+                    </ol>
+                    <p class="help-block">{{ text_tg_howto_flow }}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="col-sm-2 control-label" for="input-tg-token">{{ entry_tg_token }}</label>
+                <div class="col-sm-10">
+                  <input type="password" name="tg_token" value="" placeholder="{{ tg_has_token ? text_saved : text_key_not_set }}" id="input-tg-token" class="form-control" autocomplete="new-password" />
+                  {% if errors.tg_token %}<div class="text-danger">{{ errors.tg_token }}</div>{% endif %}
+                  <div class="help-block">
+                    {% if tg_has_token %}<span class="label label-success">{{ text_saved }}</span>{% else %}<span class="label label-warning">{{ text_key_not_set }}</span>{% endif %}
+                    {{ help_tg_token }}
+                    {% if tg_has_token %}<label class="aichat-switch" style="margin-left:10px"><input type="checkbox" name="tg_token_clear" value="1" /> {{ text_tg_token_clear }}</label>{% endif %}
+                  </div>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-2 control-label" for="input-tg-chat">{{ entry_tg_chat }}</label>
+                <div class="col-sm-4">
+                  <input type="text" name="g[g_tg_chat_id]" value="{{ g.g_tg_chat_id|e('html_attr') }}" id="input-tg-chat" class="form-control" placeholder="-1001234567890" />
+                  {% if errors.g_tg_chat_id %}<div class="text-danger">{{ errors.g_tg_chat_id }}</div>{% endif %}
+                </div>
+                <div class="col-sm-6"><div class="help-block" style="padding-top:8px">{{ help_tg_chat }}</div></div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-2 control-label">{{ text_tg_connect }}</label>
+                <div class="col-sm-10">
+                  <button type="button" class="btn btn-primary" id="aichat-tg-webhook" data-url="{{ tg_webhook_url }}"><i class="fa fa-plug"></i> {{ button_tg_webhook }}</button>
+                  <button type="button" class="btn btn-default" id="aichat-tg-test" data-url="{{ tg_test_url }}"><i class="fa fa-paper-plane-o"></i> {{ button_tg_test }}</button>
+                  <span id="aichat-tg-result" class="aichat-tg-result"></span>
+                  <div class="help-block">{{ help_tg_buttons }} <code>{{ tg_catalog|e }}</code>{% if not tg_https %} <span class="text-warning"><i class="fa fa-exclamation-triangle"></i> {{ text_tg_https }}</span>{% endif %}</div>
+                </div>
+              </div>
+
+              <fieldset>
+                <legend>{{ text_tg_translate }}</legend>
+                <div class="form-group">
+                  <label class="col-sm-2 control-label">{{ entry_tg_translate }}</label>
+                  <div class="col-sm-4">
+                    <input type="hidden" name="g[g_tg_translate]" value="0" />
+                    <label class="aichat-switch"><input type="checkbox" name="g[g_tg_translate]" value="1"{% if g.g_tg_translate %} checked="checked"{% endif %} /> {{ text_enabled }}</label>
+                  </div>
+                  <label class="col-sm-2 control-label" for="input-tg-lang">{{ entry_tg_staff_lang }}</label>
+                  <div class="col-sm-4">
+                    <select name="g[g_tg_staff_lang]" id="input-tg-lang" class="form-control">
+                      {% for code, name in staff_langs %}<option value="{{ code|e('html_attr') }}"{% if g.g_tg_staff_lang == code %} selected="selected"{% endif %}>{{ name|e }}</option>{% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-sm-offset-2 col-sm-10"><div class="help-block">{{ help_tg_translate }}</div></div>
+                </div>
+              </fieldset>
+
+              <fieldset>
+                <legend>{{ text_tg_canned }}</legend>
+                <p class="help-block">{{ help_tg_canned }}</p>
+                {% if errors.canned %}<div class="text-danger aichat-err">{{ errors.canned }}</div>{% endif %}
+                <div id="aichat-canned">
+                  {% for c in canned %}
+                  <div class="aichat-canned row" data-idx="{{ c.idx }}">
+                    <div class="col-sm-3"><div class="input-group"><span class="input-group-addon">/</span><input type="text" name="g[g_tg_canned][{{ c.idx }}][code]" value="{{ c.code|e('html_attr') }}" class="form-control" placeholder="{{ text_tg_canned_code }}" maxlength="32" /></div></div>
+                    <div class="col-sm-8"><textarea name="g[g_tg_canned][{{ c.idx }}][text]" rows="2" class="form-control" placeholder="{{ text_tg_canned_text }}">{{ c.text|e }}</textarea></div>
+                    <div class="col-sm-1"><button type="button" class="btn btn-danger btn-sm aichat-canned-del" title="{{ button_remove }}"><i class="fa fa-minus-circle"></i></button></div>
+                  </div>
+                  {% endfor %}
+                </div>
+                <button type="button" class="btn btn-success btn-sm" id="aichat-canned-add"><i class="fa fa-plus"></i> {{ button_add_canned }}</button>
+                <template id="aichat-canned-tpl">
+                  <div class="aichat-canned row" data-idx="__I__">
+                    <div class="col-sm-3"><div class="input-group"><span class="input-group-addon">/</span><input type="text" name="g[g_tg_canned][__I__][code]" value="" class="form-control" placeholder="{{ text_tg_canned_code }}" maxlength="32" /></div></div>
+                    <div class="col-sm-8"><textarea name="g[g_tg_canned][__I__][text]" rows="2" class="form-control" placeholder="{{ text_tg_canned_text }}"></textarea></div>
+                    <div class="col-sm-1"><button type="button" class="btn btn-danger btn-sm aichat-canned-del" title="{{ button_remove }}"><i class="fa fa-minus-circle"></i></button></div>
+                  </div>
+                </template>
+              </fieldset>
+              <p class="text-muted" style="margin-top:14px">{{ help_tg_store_link }} <a href="#tab-contacts" class="aichat-goto-tab">{{ tab_contacts }} &rarr;</a></p>
             </div>
 
             <!-- ============ ASSISTANT (per store) ============ -->
@@ -457,6 +592,28 @@
                   </div>
                   {% endfor %}
                 </fieldset>
+                <fieldset>
+                  <legend>{{ text_handover_title }}</legend>
+                  <div class="help-block aichat-legend-help">{{ help_handover }}</div>
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-tgchat">{{ entry_tg_chat_store }}</label>
+                    <div class="col-sm-4">
+                      <input type="text" name="s[{{ sid }}][s_tg_chat_id]" value="{{ s.s_tg_chat_id|e('html_attr') }}" id="input-s{{ sid }}-tgchat" class="form-control aichat-tg-store-chat" placeholder="{{ text_tg_use_global }}" />
+                      {% if errors[p ~ 's_tg_chat_id'] %}<div class="text-danger aichat-err">{{ errors[p ~ 's_tg_chat_id'] }}</div>{% endif %}
+                      <div class="help-block">{{ help_tg_chat_store }}</div>
+                    </div>
+                    <div class="col-sm-2"><button type="button" class="btn btn-default btn-sm aichat-tg-store-test" data-url="{{ tg_test_url }}" style="margin-top:2px"><i class="fa fa-paper-plane-o"></i> {{ button_tg_test_short }}</button></div>
+                    <div class="col-sm-4"><span class="aichat-tg-result aichat-tg-store-result"></span></div>
+                  </div>
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-hto">{{ entry_handover_timeout }}</label>
+                    <div class="col-sm-4">
+                      <div class="input-group"><input type="text" name="s[{{ sid }}][s_handover_timeout]" value="{{ s.s_handover_timeout|e('html_attr') }}" id="input-s{{ sid }}-hto" class="form-control" data-default="60" /><span class="input-group-addon">{{ text_seconds }}</span></div>
+                      {% if errors[p ~ 's_handover_timeout'] %}<div class="text-danger aichat-err">{{ errors[p ~ 's_handover_timeout'] }}</div>{% endif %}
+                      <div class="help-block">{{ help_handover_timeout }}</div>
+                    </div>
+                  </div>
+                </fieldset>
               </div>
               {% endfor %}
             </div>
@@ -465,6 +622,15 @@
             <div class="tab-pane" id="tab-orders">
               {% for store in stores %}{% set sid = store.store_id %}{% set s = store.s %}
               <div class="aichat-store" data-store="{{ sid }}">
+                <div class="form-group">
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-couriers">{{ entry_store_couriers }}</label>
+                  <div class="col-sm-4">
+                    <select name="s[{{ sid }}][s_couriers][]" id="input-s{{ sid }}-couriers" class="form-control aichat-courier-multi" multiple="multiple" size="5" data-selected="{{ s.s_couriers|json_encode|e('html_attr') }}">
+                      {% for c in couriers %}{% if c.code %}<option value="{{ c.code|e('html_attr') }}"{% if c.code in s.s_couriers %} selected="selected"{% endif %}>{{ c.name|e }}</option>{% endif %}{% endfor %}
+                    </select>
+                    <div class="help-block">{{ help_store_couriers }}</div>
+                  </div>
+                </div>
                 <div class="form-group">
                   <label class="col-sm-2 control-label" for="input-s{{ sid }}-courier">{{ entry_courier }}</label>
                   <div class="col-sm-4">
@@ -485,6 +651,80 @@
                     <div class="help-block">{{ help_order_link }}</div>
                   </div>
                 </div>
+              </div>
+              {% endfor %}
+            </div>
+
+            <!-- ============ BEHAVIOUR (per store) ============ -->
+            <div class="tab-pane" id="tab-behaviour">
+              {% for store in stores %}{% set sid = store.store_id %}{% set s = store.s %}{% set p = 's_' ~ sid ~ '_' %}
+              <div class="aichat-store" data-store="{{ sid }}">
+                <fieldset>
+                  <legend>{{ text_proactive }}</legend>
+                  <div class="help-block aichat-legend-help">{{ help_proactive }}</div>
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-proactive">{{ entry_proactive }}</label>
+                    <div class="col-sm-4">
+                      <select name="s[{{ sid }}][s_proactive]" id="input-s{{ sid }}-proactive" class="form-control">
+                        <option value="1"{% if s.s_proactive %} selected="selected"{% endif %}>{{ text_enabled }}</option>
+                        <option value="0"{% if not s.s_proactive %} selected="selected"{% endif %}>{{ text_disabled }}</option>
+                      </select>
+                    </div>
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-pdelay">{{ entry_proactive_delay }}</label>
+                    <div class="col-sm-4">
+                      <div class="input-group"><input type="text" name="s[{{ sid }}][s_proactive_delay]" value="{{ s.s_proactive_delay|e('html_attr') }}" id="input-s{{ sid }}-pdelay" class="form-control" data-default="20" /><span class="input-group-addon">{{ text_seconds }}</span></div>
+                      {% if errors[p ~ 's_proactive_delay'] %}<div class="text-danger aichat-err">{{ errors[p ~ 's_proactive_delay'] }}</div>{% endif %}
+                    </div>
+                  </div>
+                  {% for language in languages %}
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-ptext-{{ language.language_id }}">{{ entry_proactive_text }} <small>({{ language.code|e }})</small></label>
+                    <div class="col-sm-10">
+                      <input type="text" name="s[{{ sid }}][s_proactive_text][{{ language.language_id }}]" value="{{ s.s_proactive_text[language.language_id]|e('html_attr') }}" id="input-s{{ sid }}-ptext-{{ language.language_id }}" class="form-control" maxlength="200" />
+                    </div>
+                  </div>
+                  {% endfor %}
+                </fieldset>
+                <fieldset>
+                  <legend>{{ text_features }}</legend>
+                  <div class="help-block aichat-legend-help">{{ help_features }}</div>
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-sound">{{ entry_sound }}</label>
+                    <div class="col-sm-4">
+                      <select name="s[{{ sid }}][s_sound]" id="input-s{{ sid }}-sound" class="form-control">
+                        <option value="1"{% if s.s_sound %} selected="selected"{% endif %}>{{ text_enabled }}</option>
+                        <option value="0"{% if not s.s_sound %} selected="selected"{% endif %}>{{ text_disabled }}</option>
+                      </select>
+                      <div class="help-block">{{ help_sound }}</div>
+                    </div>
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-fimg">{{ entry_feat_images }}</label>
+                    <div class="col-sm-4">
+                      <select name="s[{{ sid }}][s_feat_images]" id="input-s{{ sid }}-fimg" class="form-control">
+                        <option value="1"{% if s.s_feat_images %} selected="selected"{% endif %}>{{ text_enabled }}</option>
+                        <option value="0"{% if not s.s_feat_images %} selected="selected"{% endif %}>{{ text_disabled }}</option>
+                      </select>
+                      <div class="help-block">{{ help_feat_images }}</div>
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-frate">{{ entry_feat_rating }}</label>
+                    <div class="col-sm-4">
+                      <select name="s[{{ sid }}][s_feat_rating]" id="input-s{{ sid }}-frate" class="form-control">
+                        <option value="1"{% if s.s_feat_rating %} selected="selected"{% endif %}>{{ text_enabled }}</option>
+                        <option value="0"{% if not s.s_feat_rating %} selected="selected"{% endif %}>{{ text_disabled }}</option>
+                      </select>
+                      <div class="help-block">{{ help_feat_rating }}</div>
+                    </div>
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-fcart">{{ entry_feat_cart }}</label>
+                    <div class="col-sm-4">
+                      <select name="s[{{ sid }}][s_feat_cart]" id="input-s{{ sid }}-fcart" class="form-control">
+                        <option value="1"{% if s.s_feat_cart %} selected="selected"{% endif %}>{{ text_enabled }}</option>
+                        <option value="0"{% if not s.s_feat_cart %} selected="selected"{% endif %}>{{ text_disabled }}</option>
+                      </select>
+                      <div class="help-block">{{ help_feat_cart }}</div>
+                    </div>
+                  </div>
+                </fieldset>
               </div>
               {% endfor %}
             </div>

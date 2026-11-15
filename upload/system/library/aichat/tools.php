@@ -560,7 +560,8 @@ class Tools {
 			$rows = $this->searchRows($words, $query, $categoryId, $limit + 1, false, $inStockOnly);
 		}
 
-		if (!$rows && !$inStockOnly) {
+		// a miss of the whole catalog (not of a category / in-stock subset)
+		if (!$rows && !$inStockOnly && !$categoryId) {
 			$this->logMiss($query);
 		}
 
@@ -1349,7 +1350,12 @@ class Tools {
 		$score = array();
 
 		if ($cats) {
-			$score[] = "(SELECT COUNT(*) FROM `" . DB_PREFIX . "product_to_category` x WHERE x.product_id = p.product_id AND x.category_id IN (" . implode(',', $cats) . ")) * 4";
+			// a shared small category says more than a shared catch-all one: weight = 1000 / size
+			$cases = array();
+			foreach ($this->db->query("SELECT p2c.category_id, COUNT(*) AS n FROM `" . DB_PREFIX . "product_to_category` p2c JOIN `" . DB_PREFIX . "product_to_store` p2s ON (p2s.product_id = p2c.product_id AND p2s.store_id = '" . (int)$this->storeId . "') WHERE p2c.category_id IN (" . implode(',', $cats) . ") GROUP BY p2c.category_id")->rows as $row) {
+				$cases[] = "WHEN " . (int)$row['category_id'] . " THEN " . max(1, (int)round(1000 / max(1, (int)$row['n'])));
+			}
+			$score[] = "COALESCE((SELECT SUM(CASE x.category_id " . implode(' ', $cases) . " ELSE 0 END) FROM `" . DB_PREFIX . "product_to_category` x WHERE x.product_id = p.product_id AND x.category_id IN (" . implode(',', $cats) . ")), 0)";
 		}
 
 		foreach (self::words($query) as $word) {

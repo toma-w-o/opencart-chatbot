@@ -286,6 +286,7 @@ check('rate limit per minute (6)', array_slice($codes, 0, 6) === array_fill(0, 6
 // ---------------------------------------------------------------- round 2
 if (getenv('SMOKE_DB') && getenv('SMOKE_OC')) {
 	require __DIR__ . '/smoke_round2.php';
+	require __DIR__ . '/smoke_round3.php';
 } else {
 	echo "skip round 2 (needs SMOKE_DB and SMOKE_OC)\n";
 }

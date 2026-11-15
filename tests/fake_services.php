@@ -10,6 +10,13 @@
  *                      63798828004 delivered, 63798837619 in transit, 63700000000 -> HTTP 500,
  *                      other numbers -> parcel error.
  *
+ *   POST /tg/bot<token>/<method>  Telegram Bot API. Token must be "123456:TEST-token-abcdefghijklmnop".
+ *                      createForumTopic -> new message_thread_id, sendMessage / sendPhoto -> message_id,
+ *                      answerCallbackQuery / editMessageReplyMarkup / setWebhook -> true.
+ *                      chat_id "-100666" -> error (simulated outage). Every call is kept in FAKE_TG_STATE.
+ *   GET  /tg-log       the recorded calls {next_thread, calls:[{method, params, photo_bytes?}]}
+ *   POST /tg-reset     clears them
+ *
  * Every request is appended to FAKE_SVC_LOG (env) or the system temp dir.
  */
 $log = getenv('FAKE_SVC_LOG') ? getenv('FAKE_SVC_LOG') : sys_get_temp_dir() . '/fake_services.log';
@@ -63,6 +70,62 @@ if ($path === '/v1/track' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 		exit;
 	}
 	echo json_encode(array('parcels' => array(array('parcelId' => $id, 'operations' => $ops))));
+	exit;
+}
+
+$tgState = getenv('FAKE_TG_STATE') ? getenv('FAKE_TG_STATE') : sys_get_temp_dir() . '/fake_tg.json';
+$tgLoad = function () use ($tgState) {
+	$s = is_file($tgState) ? json_decode((string)file_get_contents($tgState), true) : null;
+	return is_array($s) ? $s : array('next_thread' => 100, 'next_message' => 5000, 'calls' => array());
+};
+
+if ($path === '/tg-log') {
+	echo json_encode($tgLoad(), JSON_UNESCAPED_UNICODE);
+	exit;
+}
+
+if ($path === '/tg-reset') {
+	@unlink($tgState);
+	echo '{"ok":true}';
+	exit;
+}
+
+if (preg_match('#^/tg/bot([^/]+)/(\w+)$#', $path, $m)) {
+	if ($m[1] !== '123456:TEST-token-abcdefghijklmnop') {
+		http_response_code(401);
+		echo json_encode(array('ok' => false, 'error_code' => 401, 'description' => 'Unauthorized'));
+		exit;
+	}
+	$params = $_POST;
+	if (!$params) {
+		parse_str($raw, $params);
+	}
+	$state = $tgLoad();
+	$call = array('method' => $m[2], 'params' => $params);
+	if (isset($_FILES['photo'])) {
+		$call['photo_bytes'] = (int)$_FILES['photo']['size'];
+	}
+	if (isset($params['chat_id']) && $params['chat_id'] === '-100666') {
+		$state['calls'][] = $call + array('failed' => true);
+		file_put_contents($tgState, json_encode($state, JSON_UNESCAPED_UNICODE));
+		http_response_code(400);
+		echo json_encode(array('ok' => false, 'error_code' => 400, 'description' => 'Bad Request: chat not found'));
+		exit;
+	}
+	switch ($m[2]) {
+		case 'createForumTopic':
+			$result = array('message_thread_id' => $state['next_thread']++, 'name' => isset($params['name']) ? $params['name'] : '', 'icon_color' => 7322096);
+			break;
+		case 'sendMessage':
+		case 'sendPhoto':
+			$result = array('message_id' => $state['next_message']++, 'chat' => array('id' => (int)$params['chat_id'], 'type' => 'supergroup'), 'date' => time());
+			break;
+		default:
+			$result = true;
+	}
+	$state['calls'][] = $call;
+	file_put_contents($tgState, json_encode($state, JSON_UNESCAPED_UNICODE));
+	echo json_encode(array('ok' => true, 'result' => $result));
 	exit;
 }
 

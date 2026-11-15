@@ -29,6 +29,12 @@
 		tile('active', k.active);
 		tile('handover', k.handover);
 		tile('errors', k.errors);
+		tile('rating_up', k.rating_up || 0);
+		tile('rating_down', k.rating_down || 0);
+		tile('taken', k.taken || 0);
+		tile('missed', k.missed || 0);
+		tile('requests_open', k.requests_open || 0);
+		tile('misses_count', (d.misses || []).length);
 		tile('cost', money(k.cost));
 
 		var $b = $('[data-k="budget"]');
@@ -67,6 +73,7 @@
 			xlabel: function (l) { return +l % 3 === 0 ? l : ''; }});
 		AichatCharts.hbars(document.getElementById('chart-products'), d.products, {nodata: T.nodata});
 		AichatCharts.hbars(document.getElementById('chart-tools'), d.tools, {nodata: T.nodata, color: AichatCharts.palette[3]});
+		AichatCharts.hbars(document.getElementById('chart-misses'), d.misses || [], {nodata: T.nodata, color: AichatCharts.palette[4] || '#d97706'});
 		AichatCharts.hbars(document.getElementById('chart-topics'), d.topics, {nodata: T.nodata, color: AichatCharts.palette[2], label: function (n) { return T.page_types[n] || n; }});
 	}
 

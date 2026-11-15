@@ -1,0 +1,93 @@
+{{ header }}{{ column_left }}
+<div id="content" class="aichat-admin">
+  <div class="page-header">
+    <div class="container-fluid">
+      <div class="pull-right">
+        {% if can_modify and kb_ready %}<button type="button" class="btn btn-primary" id="aichat-kb-add"><i class="fa fa-plus"></i> {{ button_kb_add }}</button>{% endif %}
+      </div>
+      <h1>{{ text_kb }}</h1>
+      <ul class="breadcrumb">
+        {% for breadcrumb in breadcrumbs %}
+        <li><a href="{{ breadcrumb.href }}">{{ breadcrumb.text }}</a></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="container-fluid">
+    {{ subnav }}
+    {% if not kb_ready %}<div class="alert alert-warning"><i class="fa fa-info-circle"></i> {{ text_upgrade_pending }}</div>{% endif %}
+    <p class="text-muted">{{ text_kb_intro }}</p>
+
+    <div class="panel panel-default aichat-card">
+      <div class="panel-body">
+        <form method="get" action="index.php" class="aichat-filters">
+          <input type="hidden" name="route" value="extension/module/aichat/kb" />
+          <input type="hidden" name="user_token" value="{{ user_token }}" />
+          <div class="row">
+            <div class="col-sm-3"><label>{{ text_store }}</label>
+              <select name="filter_store_id" class="form-control"><option value="">{{ text_all }}</option>
+                <option value="-1"{% if filter.store_id == '-1' %} selected="selected"{% endif %}>{{ text_all_stores }}</option>
+                {% for st in stores %}<option value="{{ st.store_id }}"{% if filter.store_id != '' and filter.store_id == (st.store_id ~ '') %} selected="selected"{% endif %}>{{ st.name|e }}</option>{% endfor %}
+              </select></div>
+            <div class="col-sm-2"><label>{{ text_language }}</label>
+              <select name="filter_language_id" class="form-control"><option value="">{{ text_all }}</option>
+                <option value="0"{% if filter.language_id == '0' %} selected="selected"{% endif %}>{{ text_all_languages }}</option>
+                {% for l in language_list %}<option value="{{ l.language_id }}"{% if filter.language_id != '' and filter.language_id == (l.language_id ~ '') %} selected="selected"{% endif %}>{{ l.name|e }}</option>{% endfor %}
+              </select></div>
+            <div class="col-sm-2"><label>{{ text_status }}</label>
+              <select name="filter_status" class="form-control"><option value="">{{ text_all }}</option>
+                <option value="1"{% if filter.status == '1' %} selected="selected"{% endif %}>{{ text_kb_on }}</option>
+                <option value="0"{% if filter.status == '0' %} selected="selected"{% endif %}>{{ text_kb_off }}</option></select></div>
+            <div class="col-sm-3"><label>{{ text_search }}</label><input type="text" name="filter_q" value="{{ filter.q|e('html_attr') }}" placeholder="{{ text_kb_search_hint }}" class="form-control" /></div>
+            <div class="col-sm-2 text-right" style="padding-top:24px">
+              <a href="{{ clear }}" class="btn btn-default">{{ button_clear }}</a>
+              <button type="submit" class="btn btn-primary"><i class="fa fa-search"></i> {{ button_filter }}</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="panel panel-default aichat-card">
+      <div class="table-responsive">
+        <table class="table table-hover aichat-table">
+          <thead><tr>
+            <th>#</th><th>{{ text_store }} / {{ text_language }}</th><th>{{ entry_question }}</th><th>{{ entry_answer }}</th><th>{{ text_status }}</th><th>{{ text_date }}</th><th></th>
+          </tr></thead>
+          <tbody>
+          {% if rows %}
+            {% for r in rows %}
+            <tr class="{% if not r.status %}aichat-row-off{% endif %}">
+              <td>{{ r.id }}</td>
+              <td><span class="label label-default">{{ r.store|e }}</span><br /><span class="aichat-muted aichat-small">{{ r.language|e }}</span></td>
+              <td class="aichat-kb-cell">{{ r.q_short|e }}</td>
+              <td class="aichat-kb-cell aichat-muted">{{ r.a_short|e }}</td>
+              <td class="aichat-nowrap">{% if r.status %}<span class="label label-success">{{ text_kb_on }}</span>{% else %}<span class="label label-default">{{ text_kb_off }}</span>{% endif %}
+                {% if r.source %}<br /><a href="{{ r.source }}" class="aichat-small"><i class="fa fa-comments-o"></i> {{ text_kb_source }}</a>{% endif %}</td>
+              <td class="aichat-nowrap aichat-small">{{ r.date }}</td>
+              <td class="text-right aichat-nowrap">
+                {% if can_modify %}
+                <button type="button" class="btn btn-default btn-xs aichat-kb-edit" data-row="{{ r.json|e('html_attr') }}" title="{{ button_edit }}"><i class="fa fa-pencil"></i></button>
+                <button type="button" class="btn btn-default btn-xs aichat-kb-toggle" data-id="{{ r.id }}" data-status="{{ r.status ? 0 : 1 }}" title="{{ r.status ? button_kb_disable : button_kb_enable }}"><i class="fa {{ r.status ? 'fa-toggle-on' : 'fa-toggle-off' }}"></i></button>
+                <button type="button" class="btn btn-danger btn-xs aichat-kb-delete" data-id="{{ r.id }}" title="{{ button_delete }}"><i class="fa fa-trash-o"></i></button>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td class="text-center" colspan="7">{{ text_kb_empty }}</td></tr>
+          {% endif %}
+          </tbody>
+        </table>
+      </div>
+      <div class="panel-footer">
+        <div class="row">
+          <div class="col-sm-6 text-left">{{ pagination }}</div>
+          <div class="col-sm-6 text-right">{{ results }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>window.AICHAT_KB = {{ kb_config }}; window.AICHAT_KBPAGE = {toggle: {{ toggle_url|json_encode }}, del: {{ delete_url|json_encode }}, confirm: {{ text_kb_delete_confirm|json_encode }}};</script>
+{{ footer }}

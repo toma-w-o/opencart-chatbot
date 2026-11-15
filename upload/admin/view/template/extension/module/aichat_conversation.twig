@@ -2,7 +2,9 @@
 <div id="content" class="aichat-admin">
   <div class="page-header">
     <div class="container-fluid">
-      <div class="pull-right"><a href="{{ back }}" class="btn btn-default"><i class="fa fa-reply"></i> {{ button_back }}</a></div>
+      <div class="pull-right">
+        {% if can_modify %}<button type="button" class="btn btn-danger" id="aichat-delete-conv" data-id="{{ conv.id }}"><i class="fa fa-trash-o"></i> {{ button_delete_conversation }}</button>{% endif %}
+        <a href="{{ back }}" class="btn btn-default"><i class="fa fa-reply"></i> {{ button_back }}</a></div>
       <h1>{{ text_transcript }} #{{ conv.id }}</h1>
       <ul class="breadcrumb">
         {% for breadcrumb in breadcrumbs %}
@@ -13,17 +15,26 @@
   </div>
   <div class="container-fluid">
     {{ subnav }}
+    {% if upgrade_pending %}<div class="alert alert-warning"><i class="fa fa-info-circle"></i> {{ text_upgrade_pending }}</div>{% endif %}
     <div class="row">
       <div class="col-md-8">
         <div class="aichat-thread">
           {% for m in messages %}
           <div class="aichat-msg aichat-msg-{{ m.role }}{% if m.flagged %} is-flagged{% endif %}" data-message="{{ m.id }}">
             <div class="aichat-msg-head">
-              <strong>{% if m.role == 'user' %}{{ text_role_user }}{% elseif m.role == 'assistant' %}{{ text_role_bot }}{% elseif m.role == 'staff' %}{{ text_role_staff }}{% else %}{{ text_role_system }}{% endif %}</strong>
+              <strong>{% if m.role == 'user' %}{{ text_role_user }}{% elseif m.role == 'assistant' %}{{ text_role_bot }}{% elseif m.role == 'staff' %}<i class="fa fa-user-circle"></i> {{ text_role_staff }}{% if m.staff_name %}: {{ m.staff_name|e }}{% endif %}{% else %}{{ text_role_system }}{% endif %}</strong>
               <span class="aichat-muted">{{ m.date }}</span>
+              {% if m.rating == 1 %}<span class="label label-success aichat-rating" title="{{ text_rating_up_hint }}"><i class="fa fa-thumbs-up"></i> {{ text_rating_up }}</span>{% elseif m.rating == -1 %}<span class="label label-danger aichat-rating" title="{{ text_rating_down_hint }}"><i class="fa fa-thumbs-down"></i> {{ text_rating_down }}</span>{% endif %}
               {% if m.role == 'assistant' and can_modify %}<button type="button" class="btn btn-xs aichat-flag-btn {{ m.flagged ? 'btn-danger' : 'btn-default' }} pull-right" title="{{ text_flag_hint }}"><i class="fa fa-flag"></i> {{ text_bad_answer }}</button>{% endif %}
+              {% if m.role == 'assistant' and can_modify and kb_enabled %}<button type="button" class="btn btn-xs btn-default pull-right aichat-kb-btn" style="margin-right:6px" title="{{ text_kb_save_hint }}" data-q="{{ m.question|e('html_attr') }}" data-a="{{ m.content|e('html_attr') }}"><i class="fa fa-book"></i> {{ button_kb_save }}</button>{% endif %}
             </div>
-            <div class="aichat-bubble">{{ m.content|e|nl2br }}</div>
+            {% if m.content %}<div class="aichat-bubble">{{ m.content|e|nl2br }}</div>{% endif %}
+            {% if m.images %}
+            <div class="aichat-images">
+              {% for img in m.images %}<a href="{{ img.full }}" target="_blank" rel="noopener"><img src="{{ img.thumb }}" alt="" loading="lazy" /></a>{% endfor %}
+            </div>
+            {% endif %}
+            {% if m.kb_id %}<div class="aichat-ctx"><i class="fa fa-book"></i> <a href="{{ kb_url }}&filter_q=">{{ text_kb_already }}</a> #{{ m.kb_id }}</div>{% endif %}
 
             {% if m.page_type or m.url %}
             <div class="aichat-ctx"><i class="fa fa-map-marker"></i> {{ text_page_context }}:
@@ -82,7 +93,7 @@
               <dt>{{ text_language }}</dt><dd>{{ conv.language|e }}</dd>
               <dt>{{ text_customer }}</dt><dd>{{ conv.customer|e }}</dd>
               <dt>{{ text_date }}</dt><dd>{{ conv.date }}<br /><span class="aichat-muted">{{ conv.modified }}</span></dd>
-              <dt>{{ text_status }}</dt><dd>{{ conv.mode|e }}</dd>
+              <dt>{{ text_status }}</dt><dd>{{ conv.mode|e }}{% if conv.is_test %} <span class="label label-primary"><i class="fa fa-flask"></i> {{ text_test_chat }}</span>{% endif %}{% if conv.staff %}<br /><span class="aichat-muted">{{ text_role_staff }}: {{ conv.staff|e }}</span>{% endif %}</dd>
               <dt>{{ text_order }}</dt><dd>{% if conv.order %}#{{ conv.order }}{% else %}-{% endif %} {% if conv.attempts %}<span class="aichat-muted">({{ text_attempts }}: {{ conv.attempts }})</span>{% endif %}</dd>
               <dt>{{ text_messages }}</dt><dd>{{ conv.messages }}</dd>
               <dt>{{ text_tokens }}</dt><dd>{{ conv.tokens_in }} {{ text_in }} / {{ conv.tokens_out }} {{ text_out }}</dd>
@@ -110,5 +121,6 @@
     </div>
   </div>
 </div>
-<script>window.AICHAT_FLAG = {url: {{ flag_url|json_encode }}, token: {{ user_token|json_encode }}};</script>
+<script>window.AICHAT_FLAG = {url: {{ flag_url|json_encode }}, token: {{ user_token|json_encode }}, del: {{ delete_url|json_encode }}, confirm: {{ text_delete_confirm|json_encode }}};
+window.AICHAT_KB = {{ kb_config }};</script>
 {{ footer }}

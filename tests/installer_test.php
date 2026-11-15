@@ -33,7 +33,7 @@ $registry = new TestRegistry();
 $db = new DB('mysqli', $host, $user, $pass, $name, 3306);
 $registry->set('db', $db);
 $fails = 0;
-function check($label, $ok) {
+function check($label, $ok, $detail = "") {
 	global $fails;
 	echo ($ok ? 'ok   ' : 'FAIL ') . $label . "\n";
 	$fails += $ok ? 0 : 1;
@@ -69,6 +69,71 @@ $db->query("INSERT INTO `" . DB_PREFIX . "event` SET `code` = 'aichat_menu', `tr
 \Aichat\Installer::upgrade($registry);
 $n = $db->query("SELECT COUNT(*) AS n FROM `" . DB_PREFIX . "event` WHERE `action` = 'extension/module/aichat/menu'")->row['n'];
 check('menu event never duplicated (admin aichat_menu row)', (int)$n === 1);
+
+// ---- schema 2 state (round 2 install): no round 3 tables / columns, g_schema 2
+$p = DB_PREFIX;
+foreach (array('aichat_upload', 'aichat_kb', 'aichat_request', 'aichat_search_miss', 'aichat_preview') as $t) {
+	$db->query("DROP TABLE IF EXISTS `" . $p . $t . "`");
+}
+if ($db->query("SHOW INDEX FROM `" . $p . "aichat_conversation` WHERE `Key_name` = 'tg_topic'")->num_rows) {
+	$db->query("ALTER TABLE `" . $p . "aichat_conversation` DROP INDEX `tg_topic`");
+}
+foreach (array('tg_chat_id', 'tg_topic_id', 'staff_name', 'waiting_since', 'is_test') as $col) {
+	if ($db->query("SHOW COLUMNS FROM `" . $p . "aichat_conversation` LIKE '" . $col . "'")->num_rows) {
+		$db->query("ALTER TABLE `" . $p . "aichat_conversation` DROP `" . $col . "`");
+	}
+}
+if ($db->query("SHOW COLUMNS FROM `" . $p . "aichat_message` LIKE 'rating'")->num_rows) {
+	$db->query("ALTER TABLE `" . $p . "aichat_message` DROP `rating`");
+}
+$db->query("UPDATE `" . $p . "setting` SET `value` = '2' WHERE `key` = 'module_aichat_g_schema'");
+$db->query("DELETE FROM `" . $p . "setting` WHERE `key` IN ('module_aichat_g_tg_secret', 'module_aichat_g_model_light')");
+$conversations = (int)$db->query("SELECT COUNT(*) AS n FROM `" . $p . "aichat_conversation`")->row['n'];
+$settings = new \Aichat\Settings($registry);
+check('schema 2 state prepared', (int)$settings->getGlobal('g_schema') === 2);
+check('upgrade from schema 2 runs', \Aichat\Installer::upgrade($registry) === true);
+$tables = array();
+foreach (array('aichat_upload', 'aichat_kb', 'aichat_request', 'aichat_search_miss', 'aichat_preview') as $t) {
+	$tables[] = (bool)$db->query("SHOW TABLES LIKE '" . $p . $t . "'")->num_rows;
+}
+check('schema 3 tables created', !in_array(false, $tables, true));
+$cols = array();
+foreach (array('tg_chat_id', 'tg_topic_id', 'staff_name', 'waiting_since', 'is_test') as $col) {
+	$cols[] = (bool)$db->query("SHOW COLUMNS FROM `" . $p . "aichat_conversation` LIKE '" . $col . "'")->num_rows;
+}
+check('schema 3 conversation columns + message.rating', !in_array(false, $cols, true) && $db->query("SHOW COLUMNS FROM `" . $p . "aichat_message` LIKE 'rating'")->num_rows === 1);
+check('search_miss unique key (store, language, query)', (bool)$db->query("SHOW INDEX FROM `" . $p . "aichat_search_miss` WHERE `Key_name` = 'store_lang_query'")->num_rows);
+check('utf8mb4 tables', stripos($db->query("SHOW CREATE TABLE `" . $p . "aichat_kb`")->row['Create Table'], 'utf8mb4') !== false);
+$settings = new \Aichat\Settings($registry);
+check('g_schema = 3, g_tg_secret generated, g_model_light default', (int)$settings->getGlobal('g_schema') === 3 && preg_match('/^[a-f0-9]{48}$/', (string)$settings->getGlobal('g_tg_secret')) && $settings->getGlobal('g_model_light') === 'claude-haiku-5-5');
+check('conversations kept', (int)$db->query("SELECT COUNT(*) AS n FROM `" . $p . "aichat_conversation`")->row['n'] === $conversations);
+check('schema 3 upgrade again is a no-op', \Aichat\Installer::upgrade($registry) === false);
+\Aichat\Installer::install($registry);
+check('install() over schema 3 idempotent', (int)$db->query("SELECT COUNT(*) AS n FROM `" . $p . "aichat_conversation`")->row['n'] === $conversations);
+
+// round 3 store defaults: every key the admin saves must exist (saveStore drops unknown keys)
+$defaults = \Aichat\Settings::storeDefaults();
+$missing = array();
+foreach (array('s_couriers', 's_courier', 's_handover_timeout', 's_tg_chat_id', 's_proactive', 's_proactive_delay', 's_proactive_text', 's_sound', 's_feat_images', 's_feat_rating', 's_feat_cart') as $k) {
+	if (!array_key_exists($k, $defaults)) {
+		$missing[] = $k;
+	}
+}
+$g = \Aichat\Settings::globalDefaults();
+foreach (array('g_model_light', 'g_tg_chat_id', 'g_tg_translate', 'g_tg_staff_lang', 'g_tg_canned', 'g_report_weekly', 'g_report_email') as $k) {
+	if (!array_key_exists($k, $g)) {
+		$missing[] = $k;
+	}
+}
+check('round 3 setting keys with defaults', !$missing && $defaults['s_handover_timeout'] === 60 && $defaults['s_proactive_delay'] === 20 && $defaults['s_sound'] === 1, implode(',', $missing));
+$settings->saveGlobal(array('g_tg_secret' => 'hijack', 'g_report_week' => 'x'));
+check('internal keys not writable through saveGlobal', $settings->getGlobal('g_tg_secret') !== 'hijack' && $settings->getGlobal('g_report_week') !== 'x');
+
+// Telegram token: write-only secret file
+$settings->setSecret('tg_token', '123:abcdefghijklmnopqrstuvwxyz');
+check('setSecret / hasSecret (tg_token), not in getGlobal()', $settings->hasSecret('tg_token') && !$settings->hasSecret('other') && strpos(json_encode($settings->getGlobal()), 'abcdefghijklmnop') === false);
+$settings->setSecret('tg_token', '');
+check('secret removed', !$settings->hasSecret('tg_token'));
 
 // courier secret file: write-only storage
 $settings->setCourierSecret('selftest', array('username' => 'u', 'password' => 'p'));

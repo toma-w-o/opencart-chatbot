@@ -99,10 +99,37 @@ foreach ($messages as $i => $m) {
 // Which step are we at?
 $last = end($messages);
 $visitor = '';
+$images = 0;
 foreach ($messages as $m) {
 	if ($m['role'] === 'user' && is_string($m['content'])) {
 		$visitor = $m['content'];
+		$images = 0;
+	} elseif ($m['role'] === 'user' && is_array($m['content']) && $m['content'] && $m['content'][0]['type'] !== 'tool_result') {
+		// vision turn: image blocks first, then one text block
+		$visitor = '';
+		$images = 0;
+		foreach ($m['content'] as $block) {
+			if ($block['type'] === 'image') {
+				if (!isset($block['source']['type'], $block['source']['media_type'], $block['source']['data']) || $block['source']['type'] !== 'base64' || base64_decode($block['source']['data'], true) === false) {
+					fail400('invalid image block');
+				}
+				$images++;
+			} elseif ($block['type'] === 'text') {
+				$visitor .= $block['text'];
+			}
+		}
 	}
+}
+
+// translation requests (light model): "[<target>] <text>"
+$systemText = isset($body['system'][0]['text']) ? $body['system'][0]['text'] : '';
+if (strpos($systemText, 'You translate') === 0) {
+	preg_match('/Target language: ([^.]+)\./', $systemText, $tm);
+	preg_match('/<text>\n(.*)\n<\/text>/s', $visitor, $xm);
+	$out = '[' . (isset($tm[1]) ? $tm[1] : '?') . '] ' . (isset($xm[1]) ? $xm[1] : $visitor);
+	header('Content-Type: application/json');
+	echo json_encode(array('id' => 'msg_tr', 'type' => 'message', 'role' => 'assistant', 'model' => $body['model'], 'content' => array(array('type' => 'text', 'text' => $out)), 'stop_reason' => 'end_turn', 'usage' => array('input_tokens' => 50, 'output_tokens' => 20)));
+	exit;
 }
 
 $lastToolResult = null;
@@ -129,6 +156,9 @@ if (preg_match('/tool:(\w+) (\{.*\})\s*$/s', $visitor, $probe)) {
 		$content = array(array('type' => 'text', 'text' => $say . 'RESULT' . (!empty($lastToolResult['is_error']) ? '(error)' : '') . ': ' . $lastToolResult['content']));
 		$stop = 'end_turn';
 	}
+} elseif ($lastToolResult === null && $images > 0) {
+	$content = array(array('type' => 'text', 'text' => 'SAW ' . $images . ' IMAGES: ' . trim($visitor)));
+	$stop = 'end_turn';
 } elseif ($lastToolResult === null) {
 	$thinking = 'The visitor wants products. Search first.';
 	$content = array(

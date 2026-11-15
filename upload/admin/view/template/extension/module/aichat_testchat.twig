@@ -1,0 +1,77 @@
+{{ header }}{{ column_left }}
+<div id="content" class="aichat-admin">
+  <div class="page-header">
+    <div class="container-fluid">
+      <h1>{{ text_testchat }}</h1>
+      <ul class="breadcrumb">
+        {% for breadcrumb in breadcrumbs %}
+        <li><a href="{{ breadcrumb.href }}">{{ breadcrumb.text }}</a></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="container-fluid">
+    {{ subnav }}
+    {% if not ready %}<div class="alert alert-warning"><i class="fa fa-info-circle"></i> {{ text_upgrade_pending }}</div>{% endif %}
+    {% if not has_key %}<div class="alert alert-warning"><i class="fa fa-key"></i> {{ text_testchat_nokey }}</div>{% endif %}
+    <div class="alert alert-info aichat-costnote"><i class="fa fa-usd"></i> {{ text_testchat_cost_note }}</div>
+
+    <div class="row">
+      <div class="col-md-5">
+        <div class="panel panel-default aichat-card">
+          <div class="panel-body">
+            <div class="form-group">
+              <label for="tc-store">{{ text_store }}</label>
+              <select id="tc-store" class="form-control">
+                {% for st in stores %}<option value="{{ st.store_id }}">{{ st.name|e }}{% if not st.status %} ({{ text_tc_store_off }}){% endif %}</option>{% endfor %}
+              </select>
+            </div>
+            {% if languages|length > 1 %}
+            <div class="form-group">
+              <label for="tc-lang">{{ text_language }}</label>
+              <select id="tc-lang" class="form-control">
+                {% for l in languages %}<option value="{{ l.code|e('html_attr') }}">{{ l.name|e }}</option>{% endfor %}
+              </select>
+            </div>
+            {% endif %}
+            <div class="form-group">
+              <label for="tc-url">{{ text_tc_url }}</label>
+              <input type="text" id="tc-url" class="form-control" placeholder="https://" />
+              <div class="help-block">{{ help_tc_url }}</div>
+            </div>
+            <div class="form-group">
+              <label for="tc-ginst">{{ text_tc_global_inst }}</label>
+              <textarea id="tc-ginst" rows="5" class="form-control aichat-mono">{{ global_instructions|e }}</textarea>
+            </div>
+            <div class="form-group">
+              <label for="tc-sinst">{{ text_tc_store_inst }}</label>
+              <textarea id="tc-sinst" rows="5" class="form-control aichat-mono"></textarea>
+              <div class="help-block">{{ help_tc_draft }}</div>
+            </div>
+            <button type="button" class="btn btn-default btn-sm" id="tc-restore"><i class="fa fa-undo"></i> {{ button_tc_restore }}</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-7">
+        <div class="aichat-tc-panel">
+          <div class="aichat-tc-head">
+            <span><i class="fa fa-flask"></i> <b id="tc-title">{{ text_testchat }}</b> <small class="aichat-muted" id="tc-conv"></small></span>
+            <span>
+              <a href="#" id="tc-open" class="btn btn-link btn-xs" style="display:none" target="_blank">{{ text_open_transcript }}</a>
+              <button type="button" class="btn btn-default btn-sm" id="tc-reset"><i class="fa fa-refresh"></i> {{ button_tc_reset }}</button>
+            </span>
+          </div>
+          <div class="aichat-tc-log" id="tc-log"><div class="aichat-chart-empty">{{ text_testchat_empty }}</div></div>
+          <form class="aichat-tc-form" id="tc-form">
+            <textarea id="tc-input" rows="2" class="form-control" maxlength="1000" placeholder="{{ text_tc_placeholder }}"></textarea>
+            <button type="submit" class="btn btn-primary" id="tc-send"><i class="fa fa-paper-plane"></i> {{ button_tc_send }}</button>
+          </form>
+          <div class="aichat-tc-foot aichat-muted" id="tc-foot">{{ text_tc_foot }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>window.AICHAT_TC = {{ config_json }};</script>
+{{ footer }}

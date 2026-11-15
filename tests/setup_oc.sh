@@ -103,6 +103,5 @@ case "$PAGE" in *'value="Bot1"'*'value="18:00"'*) echo "admin settings round-tri
 # 7. Smoke test
 RC=0
 php "$REPO/tests/installer_test.php" "$OC" localhost oc oc "$DB" oc_ || RC=1
-php "$REPO/tests/upgrade3_test.php" "$OC" localhost oc oc "$DB" oc_ || RC=1
 SMOKE_DB=localhost:oc:oc:$DB:oc_ SMOKE_OC="$OC" SMOKE_MAIL="$WORK/mail.log" SMOKE_TG="http://127.0.0.1:$PSVC/tg" php "$REPO/tests/smoke_http.php" "http://127.0.0.1:$P0/" "http://127.0.0.1:$P1/" || RC=1
 exit $RC

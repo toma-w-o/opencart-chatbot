@@ -12,6 +12,7 @@
   </div>
   <div class="container-fluid">
     {{ subnav }}
+    {% if upgrade_pending %}<div class="alert alert-warning"><i class="fa fa-info-circle"></i> {{ text_upgrade_pending }}</div>{% endif %}
     <div class="panel panel-default aichat-card">
       <div class="panel-body">
         <form method="get" action="index.php" class="aichat-filters">
@@ -39,7 +40,17 @@
               <select name="filter_flagged" class="form-control"><option value="">{{ text_all }}</option>
                 <option value="1"{% if filter.flagged == '1' %} selected="selected"{% endif %}>{{ text_yes }}</option>
                 <option value="0"{% if filter.flagged == '0' %} selected="selected"{% endif %}>{{ text_no }}</option></select></div>
-            <div class="col-sm-8 text-right" style="padding-top:24px">
+            <div class="col-sm-2"><label>{{ text_rating }}</label>
+              <select name="filter_rating" class="form-control"><option value="">{{ text_all }}</option>
+                <option value="1"{% if filter.rating == '1' %} selected="selected"{% endif %}>{{ text_rating_up }}</option>
+                <option value="-1"{% if filter.rating == '-1' %} selected="selected"{% endif %}>{{ text_rating_down }}</option></select></div>
+            <div class="col-sm-2"><label>{{ text_test_chats }}</label>
+              <select name="filter_test" class="form-control">
+                <option value="">{{ text_test_hide }}</option>
+                <option value="1"{% if filter.test == '1' %} selected="selected"{% endif %}>{{ text_test_only }}</option>
+                <option value="all"{% if filter.test == 'all' %} selected="selected"{% endif %}>{{ text_test_all }}</option></select></div>
+            <div class="col-sm-4 text-right" style="padding-top:24px">
+              <a href="{{ export }}" class="btn btn-default" title="{{ help_export }}"><i class="fa fa-download"></i> {{ button_export }}</a>
               <a href="{{ clear }}" class="btn btn-default">{{ button_clear }}</a>
               <button type="submit" class="btn btn-primary"><i class="fa fa-search"></i> {{ button_filter }}</button>
             </div>
@@ -67,12 +78,16 @@
               <td class="text-right">{{ c.messages }}</td>
               <td class="text-right aichat-nowrap">{{ c.cost }}</td>
               <td class="aichat-nowrap">
+                {% if c.is_test %}<span class="label label-primary"><i class="fa fa-flask"></i> {{ text_test_chat }}</span> {% endif %}
                 {% if c.flagged %}<span class="label label-danger"><i class="fa fa-flag"></i> {{ text_flag_short }}</span> {% endif %}
+                {% if c.up %}<span class="label label-success"><i class="fa fa-thumbs-up"></i> {{ c.up }}</span> {% endif %}
+                {% if c.down %}<span class="label label-danger"><i class="fa fa-thumbs-down"></i> {{ c.down }}</span> {% endif %}
                 {% if c.order %}<span class="label label-info">{{ text_order }} #{{ c.order }}</span> {% endif %}
                 {% if c.customer %}<span class="label label-default">{{ text_customer }} {{ c.customer }}</span> {% endif %}
                 {% if c.mode == 'waiting' %}<span class="label label-danger">{{ text_mode_waiting }}</span>{% elseif c.mode == 'human' %}<span class="label label-warning">{{ text_mode_human }}</span>{% endif %}
               </td>
-              <td class="text-right"><a href="{{ c.href }}" class="btn btn-default btn-xs">{{ text_open }}</a></td>
+              <td class="text-right aichat-nowrap"><a href="{{ c.href }}" class="btn btn-default btn-xs">{{ text_open }}</a>
+                {% if can_modify %}<button type="button" class="btn btn-danger btn-xs aichat-conv-delete" data-id="{{ c.id }}" title="{{ button_delete_conversation }}"><i class="fa fa-trash-o"></i></button>{% endif %}</td>
             </tr>
             {% endfor %}
           {% else %}
@@ -90,4 +105,5 @@
     </div>
   </div>
 </div>
+<script>window.AICHAT_CONV = {url: {{ delete_url|json_encode }}, token: {{ user_token|json_encode }}, confirm: {{ text_delete_confirm|json_encode }}};</script>
 {{ footer }}

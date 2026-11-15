@@ -64,6 +64,22 @@
 				opts.push({code: code, name: name});
 			}
 		});
+		$('.aichat-courier-multi').each(function () {
+			var $s = $(this), cur = $s.val();
+			if (cur === null || typeof cur === 'undefined') {
+				try {
+					cur = JSON.parse($s.attr('data-selected') || '[]');
+				} catch (e) {
+					cur = [];
+				}
+			}
+			$s.empty();
+			$.each(opts, function (i, o) {
+				$s.append($('<option>').val(o.code).text(o.name));
+			});
+			$s.val(cur);
+			$s.attr('data-selected', JSON.stringify($s.val() || []));
+		});
 		$('.aichat-courier-select').each(function () {
 			var $s = $(this), cur = $s.val() || $s.data('selected') || '', none = $s.find('option:first').text();
 			$s.empty().append($('<option>').val('').text(none));
@@ -71,6 +87,29 @@
 				$s.append($('<option>').val(o.code).text(o.name));
 			});
 			$s.val(cur);
+		});
+	}
+
+	/* ---------- Telegram: canned replies, webhook and test buttons ---------- */
+	function cannedIndex() {
+		var max = -1;
+		$('#aichat-canned .aichat-canned').each(function () {
+			max = Math.max(max, num($(this).attr('data-idx'), -1));
+		});
+		return max + 1;
+	}
+
+	function tgCall($btn, extra, $out) {
+		var data = {user_token: $form.find('input[name="user_token"]').val() || window.AICHAT_UT || '', tg_token: $('#input-tg-token').val()};
+		$.extend(data, extra || {});
+		$btn.prop('disabled', true).find('i').addClass('fa-spin');
+		$out.removeClass('is-ok is-bad').text('...');
+		$.post($btn.data('url'), data, null, 'json').done(function (r) {
+			$out.addClass(r && r.success ? 'is-ok' : 'is-bad').text((r && r.message) || 'Error');
+		}).fail(function () {
+			$out.addClass('is-bad').text('Error');
+		}).always(function () {
+			$btn.prop('disabled', false).find('i').removeClass('fa-spin');
 		});
 	}
 
@@ -174,6 +213,24 @@
 			$(this).closest('.aichat-courier').remove();
 		}).on('change', '.aichat-courier-type', function () {
 			syncCourierRow($(this).closest('.aichat-courier'));
+		});
+
+		// Telegram
+		$('#aichat-canned-add').on('click', function () {
+			$('#aichat-canned').append($($('#aichat-canned-tpl').html().replace(/__I__/g, cannedIndex())));
+		});
+		$('#aichat-canned').on('click', '.aichat-canned-del', function () {
+			$(this).closest('.aichat-canned').remove();
+		});
+		$('#aichat-tg-webhook').on('click', function () {
+			tgCall($(this), {}, $('#aichat-tg-result'));
+		});
+		$('#aichat-tg-test').on('click', function () {
+			tgCall($(this), {chat_id: $.trim($('#input-tg-chat').val())}, $('#aichat-tg-result'));
+		});
+		$form.on('click', '.aichat-tg-store-test', function () {
+			var $st = $(this).closest('.aichat-store');
+			tgCall($(this), {chat_id: $.trim($st.find('.aichat-tg-store-chat').val()) || $.trim($('#input-tg-chat').val())}, $st.find('.aichat-tg-store-result'));
 		});
 
 		// colours: picker <-> text

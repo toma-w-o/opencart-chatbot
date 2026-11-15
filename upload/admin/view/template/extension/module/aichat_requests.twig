@@ -1,0 +1,104 @@
+{{ header }}{{ column_left }}
+<div id="content" class="aichat-admin">
+  <div class="page-header">
+    <div class="container-fluid">
+      <h1>{{ text_requests }}</h1>
+      <ul class="breadcrumb">
+        {% for breadcrumb in breadcrumbs %}
+        <li><a href="{{ breadcrumb.href }}">{{ breadcrumb.text }}</a></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="container-fluid">
+    {{ subnav }}
+    {% if not ready %}<div class="alert alert-warning"><i class="fa fa-info-circle"></i> {{ text_upgrade_pending }}</div>{% endif %}
+    <p class="text-muted">{{ text_requests_intro }}</p>
+
+    <div class="panel panel-default aichat-card">
+      <div class="panel-body">
+        <form method="get" action="index.php" class="aichat-filters">
+          <input type="hidden" name="route" value="extension/module/aichat/requests" />
+          <input type="hidden" name="user_token" value="{{ user_token }}" />
+          <div class="row">
+            <div class="col-sm-3"><label>{{ text_type }}</label>
+              <select name="filter_type" class="form-control"><option value="">{{ text_all }}</option>
+                <option value="contact"{% if filter.type == 'contact' %} selected="selected"{% endif %}>{{ text_rq_contact }}</option>
+                <option value="stock"{% if filter.type == 'stock' %} selected="selected"{% endif %}>{{ text_rq_stock }}</option>
+                <option value="return"{% if filter.type == 'return' %} selected="selected"{% endif %}>{{ text_rq_return }}</option></select></div>
+            <div class="col-sm-3"><label>{{ text_status }}</label>
+              <select name="filter_status" class="form-control"><option value="">{{ text_all }}</option>
+                <option value="new"{% if filter.status == 'new' %} selected="selected"{% endif %}>{{ text_rq_new }}</option>
+                <option value="done"{% if filter.status == 'done' %} selected="selected"{% endif %}>{{ text_rq_done }}</option></select></div>
+            <div class="col-sm-3"><label>{{ text_store }}</label>
+              <select name="filter_store_id" class="form-control"><option value="">{{ text_all_stores }}</option>
+                {% for st in stores %}<option value="{{ st.store_id }}"{% if filter.store_id != '' and filter.store_id == (st.store_id ~ '') %} selected="selected"{% endif %}>{{ st.name|e }}</option>{% endfor %}
+              </select></div>
+            <div class="col-sm-3 text-right" style="padding-top:24px">
+              <a href="{{ clear }}" class="btn btn-default">{{ button_clear }}</a>
+              <button type="submit" class="btn btn-primary"><i class="fa fa-search"></i> {{ button_filter }}</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="panel panel-default aichat-card">
+      <div class="table-responsive">
+        <table class="table aichat-table aichat-rq-table">
+          <thead><tr>
+            <th>#</th><th>{{ text_date }}</th><th>{{ text_type }}</th><th>{{ text_store }}</th><th>{{ text_rq_contact_col }}</th><th>{{ text_rq_summary }}</th><th>{{ text_status }}</th><th></th>
+          </tr></thead>
+          <tbody>
+          {% if rows %}
+            {% for r in rows %}
+            <tr class="aichat-rq-row{% if r.status == 'done' %} is-done{% endif %}" data-id="{{ r.id }}">
+              <td>{{ r.id }}</td>
+              <td class="aichat-nowrap aichat-small">{{ r.date }}</td>
+              <td class="aichat-nowrap">{% if r.type == 'contact' %}<span class="label label-info"><i class="fa fa-user"></i> {{ text_rq_contact }}</span>{% elseif r.type == 'stock' %}<span class="label label-warning"><i class="fa fa-bell"></i> {{ text_rq_stock }}</span>{% else %}<span class="label label-danger"><i class="fa fa-undo"></i> {{ text_rq_return }}</span>{% endif %}</td>
+              <td><span class="label label-default">{{ r.store|e }}</span></td>
+              <td class="aichat-small">{% if r.email %}<a href="mailto:{{ r.email|e('html_attr') }}">{{ r.email|e }}</a><br />{% endif %}{{ r.phone|e }}</td>
+              <td class="aichat-cut-wide">{{ r.summary|e }}</td>
+              <td class="aichat-nowrap aichat-rq-status">{% if r.status == 'done' %}<span class="label label-success">{{ text_rq_done }}</span>{% else %}<span class="label label-danger">{{ text_rq_new }}</span>{% endif %}</td>
+              <td class="text-right aichat-nowrap">
+                <button type="button" class="btn btn-default btn-xs aichat-rq-details" title="{{ text_rq_details }}"><i class="fa fa-search-plus"></i> {{ text_rq_details }}</button>
+                {% if can_modify %}<button type="button" class="btn btn-xs aichat-rq-toggle {{ r.status == 'done' ? 'btn-default' : 'btn-success' }}" data-status="{{ r.status == 'done' ? 'new' : 'done' }}">{% if r.status == 'done' %}<i class="fa fa-repeat"></i> {{ button_rq_reopen }}{% else %}<i class="fa fa-check"></i> {{ button_rq_done }}{% endif %}</button>{% endif %}
+              </td>
+            </tr>
+            <tr class="aichat-rq-detail" style="display:none"><td colspan="8">
+              <div class="row">
+                <div class="col-sm-6">
+                  <dl class="aichat-dl">
+                    {% if r.conversation %}<dt>{{ text_conversation }}</dt><dd><a href="{{ r.conversation_url }}"><i class="fa fa-comments-o"></i> #{{ r.conversation }}</a></dd>{% elseif r.conversation_gone %}<dt>{{ text_conversation }}</dt><dd class="aichat-muted">{{ text_rq_conv_deleted }}</dd>{% endif %}
+                    {% if r.order_id %}<dt>{{ text_order }}</dt><dd><a href="{{ r.order_url }}" target="_blank" rel="noopener"><i class="fa fa-shopping-cart"></i> #{{ r.order_id }}</a></dd>{% endif %}
+                    {% if r.product_id %}<dt>{{ text_product }}</dt><dd><a href="{{ r.product_url }}" target="_blank" rel="noopener">{{ r.product|e }}</a> <span class="aichat-muted">#{{ r.product_id }}</span></dd>{% endif %}
+                    {% if r.email %}<dt>{{ entry_email }}</dt><dd>{{ r.email|e }}</dd>{% endif %}
+                    {% if r.phone %}<dt>{{ entry_phone }}</dt><dd>{{ r.phone|e }}</dd>{% endif %}
+                  </dl>
+                </div>
+                <div class="col-sm-6">
+                  <dl class="aichat-dl">
+                    {% for fl in r.fields %}<dt>{{ fl.label|e }}</dt><dd>{% if fl.url %}<a href="{{ fl.url|e('html_attr') }}" target="_blank" rel="noopener" class="aichat-small">{{ fl.value|e }}</a>{% else %}{{ fl.value|e|nl2br }}{% endif %}</dd>{% endfor %}
+                  </dl>
+                  {% if r.images %}<div class="aichat-images">{% for img in r.images %}<a href="{{ img.full }}" target="_blank" rel="noopener"><img src="{{ img.thumb }}" alt="" loading="lazy" /></a>{% endfor %}</div>{% endif %}
+                </div>
+              </div>
+            </td></tr>
+            {% endfor %}
+          {% else %}
+            <tr><td class="text-center" colspan="8">{{ text_rq_empty }}</td></tr>
+          {% endif %}
+          </tbody>
+        </table>
+      </div>
+      <div class="panel-footer">
+        <div class="row">
+          <div class="col-sm-6 text-left">{{ pagination }}</div>
+          <div class="col-sm-6 text-right">{{ results }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>window.AICHAT_RQ = {url: {{ status_url|json_encode }}, token: {{ user_token|json_encode }}, i18n: {done: {{ text_rq_done|json_encode }}, new: {{ text_rq_new|json_encode }}, mark_done: {{ button_rq_done|json_encode }}, reopen: {{ button_rq_reopen|json_encode }}}};</script>
+{{ footer }}

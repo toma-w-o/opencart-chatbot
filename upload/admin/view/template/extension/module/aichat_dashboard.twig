@@ -15,6 +15,7 @@
   </div>
   <div class="container-fluid">
     {{ subnav }}
+    {% if upgrade_pending %}<div class="alert alert-warning"><i class="fa fa-info-circle"></i> {{ text_upgrade_pending }}</div>{% endif %}
 
     <div class="aichat-toolbar">
       <select id="aichat-store-filter" class="form-control">
@@ -38,6 +39,10 @@
       <div class="aichat-tile"><span class="aichat-tile-label"><i class="fa fa-circle aichat-live-ico"></i> {{ text_active_now }}</span><b data-k="active">-</b></div>
       <div class="aichat-tile"><span class="aichat-tile-label"><i class="fa fa-user-o"></i> {{ text_handover }}</span><b data-k="handover">-</b></div>
       <div class="aichat-tile"><span class="aichat-tile-label"><i class="fa fa-exclamation-triangle"></i> {{ text_errors }}</span><b data-k="errors">-</b></div>
+      <div class="aichat-tile"><span class="aichat-tile-label"><i class="fa fa-thumbs-o-up"></i> {{ text_ratings }}</span><b><span class="aichat-up" data-k="rating_up">-</span> <small>/</small> <span class="aichat-down" data-k="rating_down">-</span></b><span class="aichat-tile-hint">{{ text_ratings_hint }}</span></div>
+      <div class="aichat-tile"><span class="aichat-tile-label"><i class="fa fa-handshake-o"></i> {{ text_handover_outcome }}</span><b><span class="aichat-up" data-k="taken">-</span> <small>/</small> <span class="aichat-down" data-k="missed">-</span></b><span class="aichat-tile-hint">{{ text_handover_outcome_hint }}</span></div>
+      <a class="aichat-tile aichat-tile-link" id="aichat-open-requests" href="index.php?route=extension/module/aichat/requests&user_token={{ user_token }}&filter_status=new"><span class="aichat-tile-label"><i class="fa fa-inbox"></i> {{ text_open_requests }}</span><b data-k="requests_open">-</b><span class="aichat-tile-hint">{{ text_open_requests_hint }}</span></a>
+      <div class="aichat-tile"><span class="aichat-tile-label"><i class="fa fa-search-minus"></i> {{ text_misses_count }}</span><b data-k="misses_count">-</b><span class="aichat-tile-hint">{{ text_misses_count_hint }}</span></div>
     </div>
 
     <div class="aichat-panel aichat-live">
@@ -53,6 +58,7 @@
       <div class="aichat-panel"><h3>{{ text_chart_tools }}</h3><div id="chart-tools" class="aichat-chart"></div></div>
       <div class="aichat-panel"><h3>{{ text_chart_topics }}</h3><div id="chart-topics" class="aichat-chart"></div></div>
     </div>
+    <div class="aichat-panel aichat-misses"><h3>{{ text_chart_misses }} <small>{{ text_chart_misses_hint }}</small></h3><div id="chart-misses" class="aichat-chart"></div></div>
     <p class="aichat-muted">{{ text_dashboard_note }}</p>
   </div>
 </div>

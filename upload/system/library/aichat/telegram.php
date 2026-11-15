@@ -64,7 +64,8 @@ class Telegram {
 			}
 		}
 
-		return array_keys($out);
+		// array_keys() would turn "-100123" into an int
+		return array_map('strval', array_keys($out));
 	}
 
 	public function configured($storeId) {
