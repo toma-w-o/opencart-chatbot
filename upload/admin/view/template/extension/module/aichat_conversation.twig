@@ -93,7 +93,7 @@
               <dt>{{ text_language }}</dt><dd>{{ conv.language|e }}</dd>
               <dt>{{ text_customer }}</dt><dd>{{ conv.customer|e }}</dd>
               <dt>{{ text_date }}</dt><dd>{{ conv.date }}<br /><span class="aichat-muted">{{ conv.modified }}</span></dd>
-              <dt>{{ text_status }}</dt><dd>{{ conv.mode|e }}{% if conv.is_test %} <span class="label label-primary"><i class="fa fa-flask"></i> {{ text_test_chat }}</span>{% endif %}{% if conv.staff %}<br /><span class="aichat-muted">{{ text_role_staff }}: {{ conv.staff|e }}</span>{% endif %}</dd>
+              <dt>{{ text_status }}</dt><dd>{% if conv.mode == 'bot' %}{{ text_mode_bot }}{% elseif conv.mode == 'waiting' %}{{ text_mode_waiting }}{% elseif conv.mode == 'human' %}{{ text_mode_human }}{% elseif conv.mode == 'closed' %}{{ text_mode_closed }}{% else %}{{ conv.mode|e }}{% endif %}{% if conv.is_test %} <span class="label label-primary"><i class="fa fa-flask"></i> {{ text_test_chat }}</span>{% endif %}{% if conv.staff %}<br /><span class="aichat-muted">{{ text_role_staff }}: {{ conv.staff|e }}</span>{% endif %}</dd>
               <dt>{{ text_order }}</dt><dd>{% if conv.order %}#{{ conv.order }}{% else %}-{% endif %} {% if conv.attempts %}<span class="aichat-muted">({{ text_attempts }}: {{ conv.attempts }})</span>{% endif %}</dd>
               <dt>{{ text_messages }}</dt><dd>{{ conv.messages }}</dd>
               <dt>{{ text_tokens }}</dt><dd>{{ conv.tokens_in }} {{ text_in }} / {{ conv.tokens_out }} {{ text_out }}</dd>

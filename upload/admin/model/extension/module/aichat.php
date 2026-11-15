@@ -409,8 +409,9 @@ class ModelExtensionModuleAichat extends Model {
 	public function savePreview($previewId, $storeId, $url, array $data) {
 		$json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-		if ((int)$previewId && $this->db->query("SELECT 1 FROM " . $this->t('preview') . " WHERE `preview_id` = '" . (int)$previewId . "' AND `store_id` = '" . (int)$storeId . "'")->num_rows) {
-			$this->db->query("UPDATE " . $this->t('preview') . " SET `url` = '" . $this->db->escape($url) . "', `data` = '" . $this->db->escape($json) . "', `date_added` = NOW() WHERE `preview_id` = '" . (int)$previewId . "'");
+		if ((int)$previewId && $this->db->query("SELECT 1 FROM " . $this->t('preview') . " WHERE `preview_id` = '" . (int)$previewId . "' AND `store_id` = '" . (int)$storeId . "' AND `date_added` > NOW() - INTERVAL 20 HOUR")->num_rows) {
+			// date_added stays: the catalog derives the test conversation's id from it
+			$this->db->query("UPDATE " . $this->t('preview') . " SET `url` = '" . $this->db->escape($url) . "', `data` = '" . $this->db->escape($json) . "' WHERE `preview_id` = '" . (int)$previewId . "'");
 
 			return (int)$previewId;
 		}
@@ -418,6 +419,12 @@ class ModelExtensionModuleAichat extends Model {
 		$this->db->query("INSERT INTO " . $this->t('preview') . " SET `store_id` = '" . (int)$storeId . "', `url` = '" . $this->db->escape($url) . "', `data` = '" . $this->db->escape($json) . "', `date_added` = NOW()");
 
 		return (int)$this->db->getLastId();
+	}
+
+	public function getPreviewDate($previewId) {
+		$q = $this->db->query("SELECT `date_added` FROM " . $this->t('preview') . " WHERE `preview_id` = '" . (int)$previewId . "'");
+
+		return $q->num_rows ? (string)$q->row['date_added'] : '';
 	}
 
 	public function getConversationByPublicId($publicId) {

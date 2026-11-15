@@ -55,6 +55,8 @@ define('AICHAT_MAIL_FILE', '$WORK/mail.log');
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
 EOF
 pkill -f "php -d auto_prepend_file=$WORK/tools/prepend_test.php" || true
+pkill -f "127.0.0.1:$P0" || true
+pkill -f "127.0.0.1:$P1" || true
 pkill -f "127.0.0.1:$PAPI" || true
 pkill -f "127.0.0.1:$PSVC" || true
 rm -f "$WORK/mail.log" "$WORK/fake_tg.json"
@@ -85,20 +87,7 @@ curl -s -c "$CJ" -b "$CJ" -o /dev/null "$A"
 TOKEN=$(curl -s -c "$CJ" -b "$CJ" -D - -o /dev/null -d "username=admin&password=admin" "$A?route=common/login" | sed -n 's/.*user_token=\([A-Za-z0-9]*\).*/\1/p' | head -1)
 [ -n "$TOKEN" ] || { echo "admin login failed"; exit 1; }
 curl -s -b "$CJ" -o /dev/null "$A?route=extension/extension/module/install&extension=aichat&user_token=$TOKEN"
-form=(--data-urlencode "api_key=sk-test-fake-key" -d "g[g_model]=claude-sonnet-5-5" -d "g[g_instructions]=Global rule" -d "g[g_price_in]=2" -d "g[g_price_out]=10"
-	-d "g[g_budget_month]=50" -d "g[g_turnstile_site]=" -d "g[g_turnstile_secret]=" -d "g[g_retention_months]=12" -d "g[g_image_retention_days]=30")
-for sid in 0 1; do
-	form+=(-d "s[$sid][s_status]=1" -d "s[$sid][s_bot_name]=Bot$sid" -d "s[$sid][s_avatar]=default" --data-urlencode "s[$sid][s_greeting][1]=Hi from store $sid"
-		-d "s[$sid][s_instructions]=Store $sid rule" --data-urlencode "s[$sid][s_contacts][phone]=+359 88 000 00$sid" -d "s[$sid][s_contacts][email]=shop$sid@example.com"
-		-d "s[$sid][s_contacts][viber]=" -d "s[$sid][s_contacts][whatsapp]=" -d "s[$sid][s_contacts][note]=" -d "s[$sid][s_emoji]=$sid" -d "s[$sid][s_order_link_button]=0"
-		-d "s[$sid][s_budget_month]=$((sid + 5))" -d "s[$sid][s_max_chats_day]=50" -d "s[$sid][s_max_msgs_chat]=40" -d "s[$sid][s_max_msgs_minute]=6" -d "s[$sid][s_max_len]=1000")
-	for d in mon tue wed thu fri; do form+=(-d "s[$sid][s_work_hours][$d][from]=09:00" -d "s[$sid][s_work_hours][$d][to]=1$((7 + sid)):00"); done
-	for d in sat sun; do form+=(-d "s[$sid][s_work_hours][$d][from]=" -d "s[$sid][s_work_hours][$d][to]="); done
-done
-curl -s -b "$CJ" -o /dev/null "${form[@]}" "$A?route=extension/module/aichat&user_token=$TOKEN"
-PAGE=$(curl -s -b "$CJ" "$A?route=extension/module/aichat&user_token=$TOKEN")
-# (non-fatal: the admin form is being reworked; the smoke test seeds what it needs itself)
-case "$PAGE" in *'value="Bot1"'*'value="18:00"'*) echo "admin settings round-trip: ok" ;; *) echo "admin settings round-trip: FAILED (continuing)" ;; esac
+# (admin settings are saved through the browser in the admin checks; the smoke tests seed what they need)
 
 # 7. Smoke test
 RC=0

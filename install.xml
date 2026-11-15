@@ -2,7 +2,7 @@
 <modification>
   <name>AI Chat</name>
   <code>aichat</code>
-  <version>0.1.0</version>
+  <version>1.0.0</version>
   <author>Magicone</author>
   <link>https://magicone.bg</link>
   <!-- Metadata only: the extension ships files from upload/ and registers events in Aichat\Installer. -->

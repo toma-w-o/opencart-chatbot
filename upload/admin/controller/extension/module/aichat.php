@@ -1901,7 +1901,7 @@ class ControllerExtensionModuleAichat extends Controller {
 		}
 
 		$guard = new \Aichat\Guard($this->registry, $this->settings());
-		$conv = $m->getConversationByPublicId($guard->previewPublicId($previewId));
+		$conv = $m->getConversationByPublicId($guard->previewPublicId($previewId, $m->getPreviewDate($previewId)));
 
 		$products = array();
 		foreach (isset($json['products']) && is_array($json['products']) ? $json['products'] : array() as $p) {
