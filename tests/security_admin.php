@@ -226,7 +226,7 @@ try {
 	q("UPDATE oc_setting SET value = '4' WHERE store_id = 0 AND `key` = 'module_aichat_g_schema'");
 	page($admin, 'extension/module/aichat/dashboard'); // admin pages run Installer::upgrade()
 	$moved = (new \Aichat\Settings($registry))->getNamedSecret('turnstile');
-	check('L2: upgrade() moved the stored secret into the secret file and blanked the setting', $moved === 'LEGACY-TS-SECRET-456' && (string)one("SELECT value FROM oc_setting WHERE store_id = 0 AND `key` = 'module_aichat_g_turnstile_secret'") === '' && (int)one("SELECT value FROM oc_setting WHERE store_id = 0 AND `key` = 'module_aichat_g_schema'") === 5, 'file=' . $moved);
+	check('L2: upgrade() moved the stored secret into the secret file and blanked the setting', $moved === 'LEGACY-TS-SECRET-456' && (string)one("SELECT value FROM oc_setting WHERE store_id = 0 AND `key` = 'module_aichat_g_turnstile_secret'") === '' && (int)one("SELECT value FROM oc_setting WHERE store_id = 0 AND `key` = 'module_aichat_g_schema'") === \Aichat\Installer::SCHEMA, 'file=' . $moved);
 
 	// ---------------------------------------------------------- I2 / I7 / I8: transcript page
 	echo "== I2 / I7 / I8: pages\n";

@@ -198,7 +198,7 @@ check('I5: data: images stay allowed', strpos(\Aichat\Settings::sanitizeCss('.a{
 $rm = new ReflectionMethod('\Aichat\Installer', 'uninstall');
 $params = $rm->getParameters();
 check('I6: Installer::uninstall() keeps the data unless asked (default $dropData = false)', isset($params[1]) && $params[1]->getDefaultValue() === false && method_exists('\Aichat\Installer', 'purge'));
-check('schema 5 / version 1.2.0', \Aichat\Installer::SCHEMA === 5 && \Aichat\Installer::VERSION === '1.2.0');
+check('schema 6 / version 1.2.0', \Aichat\Installer::SCHEMA === 6 && \Aichat\Installer::VERSION === '1.2.0');
 
 // ------------------------------------------------------------------ M1 / M2 / L5 over HTTP
 

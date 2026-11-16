@@ -9,7 +9,7 @@ class Installer {
 	const EVENT_CODE = 'aichat';
 	const VERSION = '1.2.0';
 	/** Bump when a step is added to migrate(). */
-	const SCHEMA = 5;
+	const SCHEMA = 6;
 
 	/** Event list: trigger => action (all under code EVENT_CODE). */
 	public static function events() {
@@ -25,6 +25,8 @@ class Installer {
 		self::migrate($db, 0);
 
 		$settings = new Settings($registry);
+		// 6: duplicate setting rows left by simultaneous writes (before writes were locked); newest wins
+		$settings->removeDuplicates();
 		$fromSchema = (int)$settings->getGlobal('g_schema');
 		$settings->ensureSecret();
 		$settings->telegramSecret();
@@ -204,6 +206,11 @@ class Installer {
 		$settings->setApiKey('');
 		foreach (array_merge((array)glob(dirname(Settings::keyFile()) . '/courier_*.php'), (array)glob(dirname(Settings::keyFile()) . '/secret_*.php')) as $file) {
 			@unlink($file);
+		}
+
+		// no empty upload / secret folders left behind (audit A-18)
+		if (method_exists('\\Aichat\\Uploads', 'removeStorageDir')) {
+			Uploads::removeStorageDir();
 		}
 
 		return true;

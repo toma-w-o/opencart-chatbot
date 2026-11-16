@@ -288,7 +288,14 @@ class Orders {
 		}
 
 		$guard = new Guard($this->registry, $this->settings);
-		$ipKey = 'o:i:' . $this->ip;
+		// per-IP keys use the guard's normalised form (IPv6 cut to its /64)
+		$ipKey = 'o:i:' . (method_exists('\\Aichat\\Guard', 'rateIp') ? Guard::rateIp($this->ip) : $this->ip);
+
+		// store "under attack" (many failures this hour): few checks per IP for chats without Turnstile.
+		// The visitor sees the ordinary failure, counted like one, so the gate cannot be told apart.
+		if (method_exists($guard, 'orderGate') && !$guard->orderGate($this->storeId, $this->ip, $this->conversation)) {
+			return $this->failure();
+		}
 
 		// only failures are counted against the IP (checked here without counting)
 		if (self::rateHits($this->db, $ipKey, 3600) >= self::IP_ATTEMPTS_HOUR) {
@@ -301,22 +308,28 @@ class Orders {
 		$numberLocked = $orderId && self::rateHits($this->db, $numberKey, 86400) >= self::ORDER_FAILS_DAY;
 
 		if ($numberLocked || !$order || !self::phoneMatches($phone, $order['telephone'])) {
-			$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `order_attempts` = `order_attempts` + 1 WHERE `conversation_id` = '" . (int)$this->conversation['conversation_id'] . "'");
-			$this->conversation['order_attempts'] = (int)$this->conversation['order_attempts'] + 1;
 			$guard->hit($ipKey, 3600, self::IP_ATTEMPTS_HOUR);
 			if ($orderId) {
 				$guard->hit($numberKey, 86400, self::ORDER_FAILS_DAY);
 			}
 
-			$result = $this->genericFailure();
-			$result['attempts_left'] = max(0, self::MAX_ATTEMPTS - (int)$this->conversation['order_attempts']);
-
-			return $result;
+			return $this->failure();
 		}
 
 		$this->markVerified($orderId);
 
 		return $this->details($order, true);
+	}
+
+	/** The one failure reply: counts a conversation attempt, says how many are left. */
+	private function failure() {
+		$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `order_attempts` = `order_attempts` + 1 WHERE `conversation_id` = '" . (int)$this->conversation['conversation_id'] . "'");
+		$this->conversation['order_attempts'] = (int)$this->conversation['order_attempts'] + 1;
+
+		$result = $this->genericFailure();
+		$result['attempts_left'] = max(0, self::MAX_ATTEMPTS - (int)$this->conversation['order_attempts']);
+
+		return $result;
 	}
 
 	/** Hits of a Guard::hit() counter in its current window, without counting (same key hashing). */

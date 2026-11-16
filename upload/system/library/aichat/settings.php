@@ -294,9 +294,11 @@ class Settings {
 		$secret = (string)$this->getGlobal('g_secret', '');
 
 		if (strlen($secret) < 32) {
-			$secret = bin2hex(random_bytes(32));
-			$this->write(0, 'g_secret', $secret);
-			$this->rows = null;
+			$secret = $this->generateOnce('g_secret', function ($v) {
+				return strlen((string)$v) >= 32;
+			}, function () {
+				return bin2hex(random_bytes(32));
+			});
 		}
 
 		return $secret;
@@ -311,17 +313,91 @@ class Settings {
 		$secret = (string)$this->getGlobal('g_tg_secret', '');
 
 		if (!preg_match('/^[A-Za-z0-9_-]{32,}$/', $secret)) {
-			$secret = bin2hex(random_bytes(24));
-			$this->write(0, 'g_tg_secret', $secret);
-			$this->rows = null;
+			$secret = $this->generateOnce('g_tg_secret', function ($v) {
+				return (bool)preg_match('/^[A-Za-z0-9_-]{32,}$/', (string)$v);
+			}, function () {
+				return bin2hex(random_bytes(24));
+			});
 		}
 
 		return $secret;
 	}
 
+	/**
+	 * Generate-if-missing for a global key, race-safe: under a named lock the
+	 * value is read again straight from the database, so of two simultaneous
+	 * requests only the first generates and both return the same value.
+	 */
+	private function generateOnce($name, $valid, $make) {
+		$lock = $this->lock('0|' . $name); // the same lock as write(0, $name)
+
+		try {
+			$current = $this->readRaw(0, $name);
+			if ($current !== null && call_user_func($valid, $current)) {
+				$value = (string)$current;
+			} else {
+				$value = (string)call_user_func($make);
+				$this->writeRaw(0, $name, $value);
+			}
+		} finally {
+			$this->unlock($lock);
+		}
+
+		$this->rows = null;
+
+		return $value;
+	}
+
+	/**
+	 * Duplicate rows of one key (left by the old unlocked DELETE + INSERT when
+	 * two requests wrote at once): keeps the newest row, as load() reads it.
+	 * Called by the installer / upgrade.
+	 */
+	public function removeDuplicates() {
+		$this->db->query("DELETE s1 FROM `" . DB_PREFIX . "setting` s1 JOIN `" . DB_PREFIX . "setting` s2 ON (s2.`code` = s1.`code` AND s2.`store_id` = s1.`store_id` AND s2.`key` = s1.`key` AND s2.`setting_id` > s1.`setting_id`) WHERE s1.`code` = '" . self::CODE . "'");
+		$this->rows = null;
+
+		return (int)$this->db->countAffected();
+	}
+
+	/** MySQL / MariaDB named lock per key (5 s); '' when the server has none (then unlocked, as before). */
+	private function lock($name) {
+		$lockName = 'aichat_set_' . substr(md5((defined('DB_DATABASE') ? DB_DATABASE : '') . '|' . DB_PREFIX . '|' . $name), 0, 40);
+
+		try {
+			$row = $this->db->query("SELECT GET_LOCK('" . $this->db->escape($lockName) . "', 5) AS got")->row;
+		} catch (\Exception $e) {
+			return '';
+		}
+
+		return ($row && (string)$row['got'] === '1') ? $lockName : '';
+	}
+
+	private function unlock($lockName) {
+		if ($lockName !== '') {
+			try {
+				$this->db->query("SELECT RELEASE_LOCK('" . $this->db->escape($lockName) . "')");
+			} catch (\Exception $e) {
+				// released with the connection anyway
+			}
+		}
+	}
+
+	/** One stored value straight from the database (newest row), or null. */
+	private function readRaw($storeId, $name) {
+		$row = $this->db->query("SELECT `value`, `serialized` FROM `" . DB_PREFIX . "setting` WHERE `store_id` = '" . (int)$storeId . "' AND `code` = '" . self::CODE . "' AND `key` = '" . $this->db->escape(self::CODE . '_' . $name) . "' ORDER BY `setting_id` DESC LIMIT 1")->row;
+
+		if (!$row) {
+			return null;
+		}
+
+		return $row['serialized'] ? json_decode($row['value'], true) : $row['value'];
+	}
+
 	/** New Telegram webhook secret (admin "regenerate"); the webhook must be set again afterwards. */
 	public function regenerateTelegramSecret() {
 		$this->write(0, 'g_tg_secret', bin2hex(random_bytes(24)));
+		$this->rows = null;
 		$this->rows = null;
 
 		return $this->telegramSecret();
@@ -651,7 +727,8 @@ class Settings {
 	private function load($storeId, $scope) {
 		if ($this->rows === null) {
 			$this->rows = array();
-			$query = $this->db->query("SELECT `store_id`, `key`, `value`, `serialized` FROM `" . DB_PREFIX . "setting` WHERE `code` = '" . self::CODE . "'");
+			// ordered: if a key has duplicate rows, the newest one wins (deterministic)
+			$query = $this->db->query("SELECT `store_id`, `key`, `value`, `serialized` FROM `" . DB_PREFIX . "setting` WHERE `code` = '" . self::CODE . "' ORDER BY `setting_id` ASC");
 
 			foreach ($query->rows as $row) {
 				$value = $row['serialized'] ? json_decode($row['value'], true) : $row['value'];
@@ -673,7 +750,18 @@ class Settings {
 		return $out;
 	}
 
+	/** DELETE + INSERT of one key under a named lock, so simultaneous writers cannot leave two rows. */
 	private function write($storeId, $name, $value) {
+		$lock = $this->lock($storeId . '|' . $name);
+
+		try {
+			$this->writeRaw($storeId, $name, $value);
+		} finally {
+			$this->unlock($lock);
+		}
+	}
+
+	private function writeRaw($storeId, $name, $value) {
 		$key = self::CODE . '_' . $name;
 
 		$this->db->query("DELETE FROM `" . DB_PREFIX . "setting` WHERE `store_id` = '" . (int)$storeId . "' AND `code` = '" . self::CODE . "' AND `key` = '" . $this->db->escape($key) . "'");
