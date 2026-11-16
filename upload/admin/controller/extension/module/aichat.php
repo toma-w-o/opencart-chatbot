@@ -445,13 +445,25 @@ class ControllerExtensionModuleAichat extends Controller {
 		$this->load->model('extension/module/aichat');
 		$data['tg_takers'] = $this->model_extension_module_aichat->getRecentTakers(10);
 
-		// storage directory reachable from the web (helper of the uploads library, when present)
+		// storage directory reachable from the web (helper of the uploads library): red when a probe
+		// file could be downloaded, a softer note when it lies in the web root but could not be checked
 		$data['storage_exposed'] = false;
-		$data['storage_exposed_url'] = '';
-		if (class_exists('\\Aichat\\Uploads') && method_exists('\\Aichat\\Uploads', 'storageExposed')) {
-			$exposed = \Aichat\Uploads::storageExposed($this->registry);
-			$data['storage_exposed'] = (bool)$exposed;
-			$data['storage_exposed_url'] = is_string($exposed) ? $exposed : '';
+		$data['storage_unknown'] = false;
+		$data['storage_path'] = '';
+		if (class_exists('\\Aichat\\Uploads') && method_exists('\\Aichat\\Uploads', 'storageExposure')) {
+			// the check downloads a probe file: once per admin session and hour
+			$cached = isset($this->session->data['aichat_storage_exposure']) ? $this->session->data['aichat_storage_exposure'] : null;
+			if (is_array($cached) && isset($cached['time']) && $cached['time'] > time() - 3600) {
+				$exposure = $cached['result'];
+			} else {
+				$exposure = \Aichat\Uploads::storageExposure((string)HTTP_CATALOG);
+				$this->session->data['aichat_storage_exposure'] = array('time' => time(), 'result' => $exposure);
+			}
+			if (is_array($exposure) && !empty($exposure['inside_webroot'])) {
+				$data['storage_exposed'] = isset($exposure['http_readable']) && $exposure['http_readable'] === true;
+				$data['storage_unknown'] = !isset($exposure['http_readable']) || $exposure['http_readable'] === null;
+				$data['storage_path'] = isset($exposure['storage']) ? (string)$exposure['storage'] : '';
+			}
 		}
 
 		// Telegram (round 3): token is write-only

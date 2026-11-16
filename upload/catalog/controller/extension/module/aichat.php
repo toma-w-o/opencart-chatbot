@@ -789,9 +789,16 @@ class ControllerExtensionModuleAichat extends Controller {
 			return true;
 		}
 
-		// connection_aborted() notices a closed connection only after output: a comment line
+		// connection_aborted() notices a closed connection only when a write fails; the first
+		// write after the peer left usually still succeeds, so write twice, a moment apart
 		echo ": .\n\n";
 		flush();
+
+		if (!connection_aborted()) {
+			usleep(20000);
+			echo ": .\n\n";
+			flush();
+		}
 
 		return !connection_aborted();
 	}

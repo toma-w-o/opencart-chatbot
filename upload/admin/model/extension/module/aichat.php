@@ -410,7 +410,7 @@ class ModelExtensionModuleAichat extends Model {
 	/**
 	 * Staff who took chats recently (system messages with meta.handover = take):
 	 * {name, id, date}, newest first, one row per name + id. The id is
-	 * meta.staff_id (numeric Telegram user id) when the handover logged it.
+	 * meta.staff_tg_id (numeric Telegram user id) when the handover logged it.
 	 */
 	public function getRecentTakers($limit = 10) {
 		$out = array();
@@ -425,7 +425,8 @@ class ModelExtensionModuleAichat extends Model {
 				continue;
 			}
 			$name = isset($meta['staff_name']) ? (string)$meta['staff_name'] : '';
-			$id = isset($meta['staff_id']) && preg_match('/^\d{1,15}$/', (string)$meta['staff_id']) ? (string)$meta['staff_id'] : '';
+			$raw = isset($meta['staff_tg_id']) ? $meta['staff_tg_id'] : (isset($meta['staff_id']) ? $meta['staff_id'] : '');
+			$id = preg_match('/^[1-9]\d{0,14}$/', (string)$raw) ? (string)$raw : '';
 			$key = $name . '|' . $id;
 			if (!isset($out[$key])) {
 				$out[$key] = array('name' => $name, 'id' => $id !== '' ? $id : '?', 'date' => (string)$row['date_added']);

@@ -194,7 +194,7 @@ class Mailer {
 
 	/** "jane@example.com" -> "[address]" (for log lines). */
 	public static function maskAddresses($text) {
-		return preg_replace('/[^\s<>()"\',;:]+@[^\s<>()"\',;:]+/u', '[address]', (string)$text);
+		return preg_replace('/[^\s<>()"\',;:]*@[^\s<>()"\',;:]*/u', '[address]', (string)$text);
 	}
 
 	/** "jane.doe@example.com" -> "j***@e***.com" (shown to the visitor before a transcript is sent). */

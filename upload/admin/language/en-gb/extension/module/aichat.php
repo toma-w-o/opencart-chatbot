@@ -510,3 +510,4 @@ $_['text_purge_help'] = 'OpenCart\'s "Uninstall" button only switches the module
 $_['button_purge'] = 'Delete everything';
 $_['error_purge_confirm'] = 'Nothing was deleted: type DELETE (capital letters) to confirm.';
 $_['text_purged'] = 'All AI Chat data was deleted. The module starts again with empty tables and default settings.';
+$_['text_storage_unknown'] = 'OpenCart\'s storage folder (API key files, uploaded customer photos) lies inside the web root and the shop could not check whether the web server blocks it. Make sure it cannot be downloaded, or move it outside the web root (System > Maintenance).';

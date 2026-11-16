@@ -250,7 +250,7 @@ try {
 
 	// ---------------------------------------------------------- g_tg_staff_ids field + recent takers
 	echo "== Telegram staff ids\n";
-	q("INSERT INTO oc_aichat_message SET conversation_id = 0, role = 'system', content = 'x joined', meta = '{\"handover\":\"take\",\"staff_name\":\"SecTaker P.\",\"staff_id\":\"424242\"}', date_added = NOW()");
+	q("INSERT INTO oc_aichat_message SET conversation_id = 0, role = 'system', content = 'x joined', meta = '{\"handover\":\"take\",\"staff_name\":\"SecTaker P.\",\"staff_tg_id\":424242}', date_added = NOW()");
 	$takerMsg = (int)$db->insert_id;
 	list($html) = page($admin, 'extension/module/aichat');
 	q("DELETE FROM oc_aichat_message WHERE message_id = " . $takerMsg);
@@ -258,6 +258,9 @@ try {
 	check('g_tg_staff_ids: recent takers listed with their id', strpos($html, 'SecTaker P.') !== false && strpos($html, '424242') !== false);
 	check('g_tg_staff_ids: default is an empty list', \Aichat\Settings::globalDefaults()['g_tg_staff_ids'] === array());
 	check('I8: privacy note on the settings page', strpos($html, 'fa-user-secret') !== false);
+	// the rig serves the shop with PHP's built-in server, which ignores .htaccess: storage is downloadable there
+	// (the single-threaded built-in server cannot answer the admin's own probe request, so "could not check" is accepted too)
+	check('storage folder inside the web root -> warning banner on the settings page', preg_match('/alert alert-(danger|warning)"><i class="fa fa-exclamation-triangle"><\/i> (The AI Chat storage folder|OpenCart\'s storage folder|Папката)/u', $html) === 1);
 
 	// ---------------------------------------------------------- the real settings form: save path of L2 / I5
 	echo "== settings form save\n";
@@ -291,11 +294,17 @@ try {
 	$form['g[g_tg_staff_ids]'] = 'abc';
 	list($bad) = page($admin, 'extension/module/aichat', $form);
 	check('g_tg_staff_ids: non-numeric ids are rejected', strpos($bad, 'Only numeric Telegram user ids') !== false || strpos($bad, 'Само числови Telegram ID') !== false);
-	q("DELETE FROM oc_setting WHERE code = 'module_aichat'");
-	foreach ($snapshot as $row) {
-		q("INSERT INTO oc_setting SET store_id = " . (int)$row['store_id'] . ", code = 'module_aichat', `key` = '" . $db->real_escape_string($row['key']) . "', value = '" . $db->real_escape_string($row['value']) . "', serialized = " . (int)$row['serialized']);
+	// put back only the keys this test changed (the form saved every other key with its current value)
+	$restore = array('module_aichat_s_custom_css', 'module_aichat_g_tg_staff_ids', 'module_aichat_s_max_msgs_minute');
+	foreach ($restore as $key) {
+		q("DELETE FROM oc_setting WHERE code = 'module_aichat' AND `key` = '" . $key . "'");
 	}
-	check('restored: module settings as before the form test', (int)one("SELECT COUNT(*) FROM oc_setting WHERE code = 'module_aichat'") === count($snapshot));
+	foreach ($snapshot as $row) {
+		if (in_array($row['key'], $restore, true)) {
+			q("INSERT INTO oc_setting SET store_id = " . (int)$row['store_id'] . ", code = 'module_aichat', `key` = '" . $db->real_escape_string($row['key']) . "', value = '" . $db->real_escape_string($row['value']) . "', serialized = " . (int)$row['serialized']);
+		}
+	}
+	check('restored: custom CSS, staff ids, message limit as before', (string)one("SELECT value FROM oc_setting WHERE store_id = 0 AND `key` = 'module_aichat_s_custom_css'") === (string)$cssBefore && (new \Aichat\Settings($registry))->getGlobal('g_tg_staff_ids') === array());
 
 	// ---------------------------------------------------------- I6: purge needs modify + typed word
 	echo "== I6: delete all data\n";

@@ -21,7 +21,7 @@
       <button type="button" class="close" data-dismiss="alert">&times;</button>
     </div>
     {% endif %}
-    {% if storage_exposed %}<div class="alert alert-danger"><i class="fa fa-exclamation-triangle"></i> {{ text_storage_exposed }}{% if storage_exposed_url %} <code>{{ storage_exposed_url|e }}</code>{% endif %}</div>{% endif %}
+    {% if storage_exposed %}<div class="alert alert-danger"><i class="fa fa-exclamation-triangle"></i> {{ text_storage_exposed }}{% if storage_path %} <code>{{ storage_path|e }}</code>{% endif %}</div>{% elseif storage_unknown %}<div class="alert alert-warning"><i class="fa fa-exclamation-triangle"></i> {{ text_storage_unknown }}{% if storage_path %} <code>{{ storage_path|e }}</code>{% endif %}</div>{% endif %}
     <div class="alert alert-info"><i class="fa fa-user-secret"></i> {{ text_privacy_access }}</div>
     {% if success %}
     <div class="alert alert-success alert-dismissible"><i class="fa fa-check-circle"></i> {{ success }}
