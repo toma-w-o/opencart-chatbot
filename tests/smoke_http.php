@@ -166,6 +166,8 @@ if (getenv('SMOKE_DB') && getenv('SMOKE_OC')) {
 			's_instructions' => 'Store ' . $sid . ' rule', 's_contacts' => array('phone' => '+359 88 000 00' . $sid, 'email' => 'shop' . $sid . '@example.com', 'viber' => '', 'whatsapp' => '', 'note' => ''),
 			's_work_hours' => $hours, 's_emoji' => $sid, 's_order_link_button' => 0, 's_budget_month' => $sid + 5, 's_max_chats_day' => 0,
 			's_max_msgs_chat' => 40, 's_max_msgs_minute' => 6, 's_max_len' => 1000,
+			// round 4: request mails go to s_notify_email (else the store's config_email)
+			's_notify_email' => 'shop' . $sid . '@example.com',
 		);
 		foreach ($store as $k => $v) {
 			setting($sid, $k, $v);
@@ -287,6 +289,7 @@ check('rate limit per minute (6)', array_slice($codes, 0, 6) === array_fill(0, 6
 if (getenv('SMOKE_DB') && getenv('SMOKE_OC')) {
 	require __DIR__ . '/smoke_round2.php';
 	require __DIR__ . '/smoke_round3.php';
+	require __DIR__ . '/smoke_round4.php';
 } else {
 	echo "skip round 2 (needs SMOKE_DB and SMOKE_OC)\n";
 }

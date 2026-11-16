@@ -105,7 +105,7 @@ check('schema 3 conversation columns + message.rating', !in_array(false, $cols, 
 check('search_miss unique key (store, language, query)', (bool)$db->query("SHOW INDEX FROM `" . $p . "aichat_search_miss` WHERE `Key_name` = 'store_lang_query'")->num_rows);
 check('utf8mb4 tables', stripos($db->query("SHOW CREATE TABLE `" . $p . "aichat_kb`")->row['Create Table'], 'utf8mb4') !== false);
 $settings = new \Aichat\Settings($registry);
-check('g_schema = 3, g_tg_secret generated, g_model_light default', (int)$settings->getGlobal('g_schema') === 3 && preg_match('/^[a-f0-9]{48}$/', (string)$settings->getGlobal('g_tg_secret')) && $settings->getGlobal('g_model_light') === 'claude-haiku-5-5');
+check('g_schema current, g_tg_secret generated, g_model_light default', (int)$settings->getGlobal('g_schema') === \Aichat\Installer::SCHEMA && preg_match('/^[a-f0-9]{48}$/', (string)$settings->getGlobal('g_tg_secret')) && $settings->getGlobal('g_model_light') === 'claude-haiku-5-5');
 check('conversations kept', (int)$db->query("SELECT COUNT(*) AS n FROM `" . $p . "aichat_conversation`")->row['n'] === $conversations);
 check('schema 3 upgrade again is a no-op', \Aichat\Installer::upgrade($registry) === false);
 \Aichat\Installer::install($registry);
@@ -140,5 +140,34 @@ $settings->setCourierSecret('selftest', array('username' => 'u', 'password' => '
 check('courier secret stored', $settings->hasCourierSecret('selftest') && !$settings->hasCourierSecret('none') && strpos(json_encode($settings->getGlobal()), '"p"') === false);
 $settings->setCourierSecret('selftest', array());
 check('courier secret removed', !$settings->hasCourierSecret('selftest'));
+
+// ---- schema 3 state (1.0.x install) -> 4: aichat_request.mailed, courier pattern / aliases, NextLevel seed
+if ($db->query("SHOW COLUMNS FROM `" . $p . "aichat_request` LIKE 'mailed'")->num_rows) {
+	$db->query("ALTER TABLE `" . $p . "aichat_request` DROP `mailed`");
+}
+$db->query("UPDATE `" . $p . "setting` SET `value` = '3' WHERE `key` = 'module_aichat_g_schema'");
+$old = array(
+	array('code' => 'speedy', 'name' => 'Speedy', 'type' => 'speedy', 'hosts' => array('speedy.bg'), 'track_url' => 'https://www.speedy.bg/bg/track-shipment?shipmentNumber={number}'),
+	array('code' => 'econt', 'name' => 'Econt', 'type' => 'link', 'hosts' => array('econt.com'), 'track_url' => 'https://www.econt.com/services/track-shipment/{number}'),
+);
+$db->query("UPDATE `" . $p . "setting` SET `value` = '" . $db->escape(json_encode($old)) . "' WHERE `key` = 'module_aichat_g_couriers'");
+$requests = (int)$db->query("SELECT COUNT(*) AS n FROM `" . $p . "aichat_request`")->row['n'];
+$settings = new \Aichat\Settings($registry);
+check('upgrade from schema 3 runs', \Aichat\Installer::upgrade($registry) === true);
+check('aichat_request.mailed added (NULL = not attempted)', (bool)$db->query("SHOW COLUMNS FROM `" . $p . "aichat_request` WHERE `Field` = 'mailed' AND `Null` = 'YES'")->num_rows);
+$settings = new \Aichat\Settings($registry);
+$c = $settings->couriers();
+check('Speedy row gets the seed pattern + aliases, other rows untouched', $c['speedy']['pattern'] === '^6\\d{10}$' && in_array('Спиди', $c['speedy']['aliases'], true) && $c['econt']['pattern'] === '' && $c['econt']['track_url'] === 'https://www.econt.com/services/track-shipment/{number}', json_encode($c, JSON_UNESCAPED_UNICODE));
+check('NextLevel row seeded', isset($c['nextlevel']) && $c['nextlevel']['type'] === 'link' && $c['nextlevel']['hosts'] === array('nextlevel.delivery') && $c['nextlevel']['track_url'] === 'https://nextlevel.delivery/bg/track?awb={number}' && $c['nextlevel']['pattern'] === '^1000\\d{9}$');
+check('g_schema = 4, requests kept', (int)$settings->getGlobal('g_schema') === 4 && (int)$db->query("SELECT COUNT(*) AS n FROM `" . $p . "aichat_request`")->row['n'] === $requests);
+check('schema 4 upgrade again is a no-op', \Aichat\Installer::upgrade($registry) === false && count($settings->couriers()) === 3);
+// the owner deletes NextLevel: install() over schema 4 does not bring it back
+$settings->saveGlobal(array('g_couriers' => $old));
+\Aichat\Installer::install($registry);
+$settings = new \Aichat\Settings($registry);
+check('deleted NextLevel row stays deleted after install() over schema 4', !isset($settings->couriers()['nextlevel']));
+$settings->saveGlobal(array('g_couriers' => \Aichat\Settings::defaultCouriers()));
+$d4 = \Aichat\Settings::storeDefaults();
+check('round 4 store keys with defaults', $d4['s_store_name'] === '' && $d4['s_notify_email'] === '' && $d4['s_attention'] === 1 && $d4['s_attention_interval'] === 5);
 
 exit($fails ? 1 : 0);
