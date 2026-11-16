@@ -14,7 +14,12 @@ namespace Aichat;
  */
 class Orders {
 	const MAX_ATTEMPTS = 5;
+	/** failed lookups per IP and hour (successful ones are not counted) */
 	const IP_ATTEMPTS_HOUR = 10;
+	/** failed lookups per order number, store and day, whoever makes them (audit M3) */
+	const ORDER_FAILS_DAY = 6;
+	/** a guest's verification lapses after this many seconds without use (audit L3) */
+	const VERIFY_IDLE = 1800;
 	const MY_ORDERS_MAX = 10;
 
 	private $registry;
@@ -60,7 +65,7 @@ class Orders {
 
 	/** Tracking URLs of the conversation's verified order (link filter at the start of a reply). */
 	public function verifiedUrls() {
-		$id = $this->conversation ? (int)$this->conversation['verified_order_id'] : 0;
+		$id = ($this->conversation && self::verificationFresh($this->conversation)) ? (int)$this->conversation['verified_order_id'] : 0;
 
 		if ($id) {
 			$order = $this->orderRow($id);
@@ -110,13 +115,107 @@ class Orders {
 			return false;
 		}
 
-		if ($this->conversation && (int)$this->conversation['verified_order_id'] === (int)$order['order_id']) {
+		$customerId = $this->customerId();
+
+		if ($customerId && (int)$order['customer_id'] === $customerId) {
 			return true;
 		}
 
+		return $this->conversation && (int)$this->conversation['verified_order_id'] === (int)$order['order_id'] && self::verificationFresh($this->conversation);
+	}
+
+	/**
+	 * A guest's order verification is usable: an order is verified in this
+	 * conversation and it was confirmed or used less than VERIFY_IDLE seconds
+	 * ago. Rows without the schema 5 columns count as not fresh (fail closed).
+	 * The catalog controller uses this to decide whether history replay may
+	 * show order / tracking cards and the view-order link.
+	 *
+	 * @param array|null $conversation aichat_conversation row
+	 */
+	public static function verificationFresh($conversation, $now = null) {
+		if (!is_array($conversation) || empty($conversation['verified_order_id'])) {
+			return false;
+		}
+
+		$seen = isset($conversation['verified_seen_at']) ? strtotime((string)$conversation['verified_seen_at']) : false;
+		$at = isset($conversation['verified_at']) ? strtotime((string)$conversation['verified_at']) : false;
+		$last = max((int)$seen, (int)$at);
+
+		return $last > 0 && $last + self::VERIFY_IDLE >= ($now === null ? time() : (int)$now);
+	}
+
+	/**
+	 * The phone was confirmed (find_order with the right phone) less than
+	 * VERIFY_IDLE seconds ago in this conversation: required before
+	 * order_change_request / return_request for a guest's order.
+	 */
+	public static function phoneFresh($conversation, $orderId, $now = null) {
+		if (!is_array($conversation) || (int)$conversation['verified_order_id'] !== (int)$orderId || empty($conversation['verified_at'])) {
+			return false;
+		}
+
+		$at = strtotime((string)$conversation['verified_at']);
+
+		return $at && $at + self::VERIFY_IDLE >= ($now === null ? time() : (int)$now);
+	}
+
+	/**
+	 * History replay helper for the catalog controller: drops order and
+	 * tracking cards (incl. the view-order link) of a guest conversation whose
+	 * verification has lapsed. Conversations of a logged-in customer keep them
+	 * (only that customer can open them).
+	 *
+	 * @param array      $cards        message meta cards
+	 * @param array|null $conversation aichat_conversation row
+	 */
+	public static function replayCards(array $cards, $conversation) {
+		if (is_array($conversation) && (int)$conversation['customer_id'] > 0) {
+			return $cards;
+		}
+
+		if (self::verificationFresh($conversation)) {
+			return $cards;
+		}
+
+		$out = array();
+
+		foreach ($cards as $card) {
+			if (is_array($card) && isset($card['type']) && in_array($card['type'], array('order', 'tracking'), true)) {
+				continue;
+			}
+			$out[] = $card;
+		}
+
+		return $out;
+	}
+
+	/** Verified by the logged-in customer's session or by a phone confirmed within VERIFY_IDLE. */
+	public function changeAllowed(array $order) {
 		$customerId = $this->customerId();
 
-		return $customerId && (int)$order['customer_id'] === $customerId;
+		if ($customerId && (int)$order['customer_id'] === $customerId) {
+			return true;
+		}
+
+		return self::phoneFresh($this->conversation, (int)$order['order_id']);
+	}
+
+	/** The order verified in this conversation while the verification is fresh, else 0 (prompt hint). */
+	public function freshVerifiedOrderId() {
+		return self::verificationFresh($this->conversation) ? (int)$this->conversation['verified_order_id'] : 0;
+	}
+
+	/** Keeps a guest's verification alive while it is used. */
+	private function touchVerified($orderId) {
+		if (!$this->conversation || (int)$this->conversation['verified_order_id'] !== (int)$orderId || !self::verificationFresh($this->conversation)) {
+			return;
+		}
+
+		if (array_key_exists('verified_seen_at', $this->conversation)) {
+			$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `verified_seen_at` = NOW() WHERE `conversation_id` = '" . (int)$this->conversation['conversation_id'] . "'");
+			$this->conversation['verified_seen_at'] = date('Y-m-d H:i:s');
+		}
 	}
 
 	/**
@@ -171,10 +270,15 @@ class Orders {
 			return $this->genericFailure();
 		}
 
-		// Already verified in this conversation
-		if ($orderId && (int)$this->conversation['verified_order_id'] === $orderId) {
+		// Already verified in this conversation and still fresh: no phone needed
+		if ($orderId && (int)$this->conversation['verified_order_id'] === $orderId && self::verificationFresh($this->conversation)) {
 			$order = $this->orderRow($orderId);
 			if ($order) {
+				if (self::phoneMatches($phone, $order['telephone'])) {
+					$this->markVerified($orderId); // phone confirmed again: change / return requests allowed for 30 min
+				} else {
+					$this->touchVerified($orderId);
+				}
 				return $this->details($order, true);
 			}
 		}
@@ -184,16 +288,25 @@ class Orders {
 		}
 
 		$guard = new Guard($this->registry, $this->settings);
+		$ipKey = 'o:i:' . $this->ip;
 
-		if (!$guard->hit('o:i:' . $this->ip, 3600, self::IP_ATTEMPTS_HOUR)) {
+		// only failures are counted against the IP (checked here without counting)
+		if (self::rateHits($this->db, $ipKey, 3600) >= self::IP_ATTEMPTS_HOUR) {
 			return $this->locked();
 		}
 
 		$order = $orderId ? $this->orderRow($orderId) : null;
+		// failures per order number (and store) per day, from any IP or chat; the reply stays the generic one
+		$numberKey = 'o:n:' . $this->storeId . ':' . $orderId;
+		$numberLocked = $orderId && self::rateHits($this->db, $numberKey, 86400) >= self::ORDER_FAILS_DAY;
 
-		if (!$order || !self::phoneMatches($phone, $order['telephone'])) {
+		if ($numberLocked || !$order || !self::phoneMatches($phone, $order['telephone'])) {
 			$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `order_attempts` = `order_attempts` + 1 WHERE `conversation_id` = '" . (int)$this->conversation['conversation_id'] . "'");
 			$this->conversation['order_attempts'] = (int)$this->conversation['order_attempts'] + 1;
+			$guard->hit($ipKey, 3600, self::IP_ATTEMPTS_HOUR);
+			if ($orderId) {
+				$guard->hit($numberKey, 86400, self::ORDER_FAILS_DAY);
+			}
 
 			$result = $this->genericFailure();
 			$result['attempts_left'] = max(0, self::MAX_ATTEMPTS - (int)$this->conversation['order_attempts']);
@@ -206,10 +319,21 @@ class Orders {
 		return $this->details($order, true);
 	}
 
+	/** Hits of a Guard::hit() counter in its current window, without counting (same key hashing). */
+	public static function rateHits($db, $key, $window) {
+		$start = (int)(floor(time() / $window) * $window);
+		$row = $db->query("SELECT `hits` FROM `" . DB_PREFIX . "aichat_rate` WHERE `rate_key` = '" . $db->escape(substr(hash('sha256', $key), 0, 64)) . "' AND `window_start` = '" . $start . "'")->row;
+
+		return $row ? (int)$row['hits'] : 0;
+	}
+
 	private function markVerified($orderId) {
 		if ($this->conversation) {
-			$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `verified_order_id` = '" . (int)$orderId . "' WHERE `conversation_id` = '" . (int)$this->conversation['conversation_id'] . "'");
+			$times = array_key_exists('verified_at', $this->conversation) ? ", `verified_at` = NOW(), `verified_seen_at` = NOW()" : '';
+			$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `verified_order_id` = '" . (int)$orderId . "'" . $times . " WHERE `conversation_id` = '" . (int)$this->conversation['conversation_id'] . "'");
 			$this->conversation['verified_order_id'] = (int)$orderId;
+			$this->conversation['verified_at'] = date('Y-m-d H:i:s');
+			$this->conversation['verified_seen_at'] = date('Y-m-d H:i:s');
 		}
 	}
 
@@ -284,6 +408,9 @@ class Orders {
 		}
 
 		$this->allow($found);
+		if ($this->conversation) {
+			$this->touchVerified((int)$this->conversation['verified_order_id']);
+		}
 
 		return $this->trackOne($found);
 	}
@@ -569,7 +696,7 @@ class Orders {
 	private function visibleOrders() {
 		$out = array();
 
-		if ($this->conversation && (int)$this->conversation['verified_order_id']) {
+		if ($this->conversation && (int)$this->conversation['verified_order_id'] && self::verificationFresh($this->conversation)) {
 			$order = $this->orderRow((int)$this->conversation['verified_order_id']);
 			if ($order && $this->maySee($order)) {
 				$out[(int)$order['order_id']] = $order;

@@ -81,6 +81,7 @@
     mute: ['Mute sounds', 'Изключи звука', 'Σίγαση ήχων'],
     unmute: ['Turn sounds on', 'Включи звука', 'Ενεργοποίηση ήχων'],
     sent_ok: ['Sent. Check your inbox.', 'Изпратено. Проверете пощата си.', 'Εστάλη. Ελέγξτε τα εισερχόμενα.'],
+    transcript_confirm: ['Send the conversation to %s?', 'Да изпратя ли разговора на %s?', 'Αποστολή της συνομιλίας στο %s;'],
     dismiss: ['Dismiss', 'Затвори', 'Κλείσιμο']
   };
   var lang = (document.documentElement.lang || navigator.language || 'en').toLowerCase().slice(0, 2);
@@ -635,22 +636,27 @@
     el.mMute = h('button', 'aichat-mitem', { type: 'button', role: 'menuitem' });
     el.mSub = h('div', 'aichat-msub'); el.mSub.hidden = true;
     el.mTranscript.addEventListener('click', function () {
+      // the server decides the address (account e-mail or the e-mail of an order checked in this chat)
       el.mSub.innerHTML = ''; el.mSub.hidden = false;
-      var em = h('input', 'aichat-minput', { type: 'email', placeholder: t('email_ph'), 'aria-label': t('email_ph'), autocomplete: 'email' });
-      var go = txt('button', 'aichat-mbtn', t('send'), { type: 'button' });
-      var msg = h('div', 'aichat-mmsg');
-      go.addEventListener('click', function () {
-        var v = em.value.trim();
-        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) { em.focus(); return; }
-        go.disabled = true;
-        postJson('transcript', { token: state.token, email: v }).then(function (j) {
-          go.disabled = false;
-          if (j && j.error) { msg.textContent = j.error.message || t('error'); return; }
-          toggleMenu(false); addSys((j && j.message) || t('sent_ok'));
+      var msg = h('div', 'aichat-mmsg', { role: 'status' });
+      el.mSub.appendChild(msg);
+      postJson('transcript', { token: state.token, check: 1 }).then(function (j) {
+        if (!j || j.error || !j.available) { msg.textContent = (j && j.error && j.error.message) || (j && j.message) || t('error'); return; }
+        msg.textContent = t('transcript_confirm').replace('%s', String(j.masked || ''));
+        var go = txt('button', 'aichat-mbtn', t('send'), { type: 'button' });
+        var no = txt('button', 'aichat-mbtn aichat-mghost', t('cancel'), { type: 'button' });
+        no.addEventListener('click', function () { el.mSub.hidden = true; });
+        go.addEventListener('click', function () {
+          go.disabled = true;
+          postJson('transcript', { token: state.token }).then(function (r) {
+            go.disabled = false;
+            if (r && r.error) { msg.textContent = r.error.message || t('error'); return; }
+            toggleMenu(false); addSys((r && r.message) || t('sent_ok'));
+          });
         });
+        el.mSub.appendChild(go); el.mSub.appendChild(no);
+        go.focus();
       });
-      el.mSub.appendChild(em); el.mSub.appendChild(go); el.mSub.appendChild(msg);
-      em.focus();
     });
     el.mForget.addEventListener('click', function () {
       el.mSub.innerHTML = ''; el.mSub.hidden = false;
@@ -1034,7 +1040,7 @@
     if (!human() || !state.token) { return; }
     if (document.hidden && Date.now() - poll.hiddenAt > 60000) { poll.paused = true; return; }
     poll.busy = true;
-    fetch(endpoint('poll', { token: state.token, after: state.lastId }), { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+    fetch(endpoint('poll', { after: state.lastId }), { credentials: 'same-origin', headers: { 'Accept': 'application/json', 'X-Aichat-Token': state.token } })
       .then(function (r) { return r.json(); })
       .then(function (j) {
         if (!j || j.error) { return; }
@@ -1402,7 +1408,9 @@
   function doBoot(force) {
     if (state.booting || (state.busy && !force)) { return Promise.resolve(); }
     state.booting = true;
-    return fetch(endpoint('boot', { url: location.href, token: state.token || undefined }), { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+    var bh = { 'Accept': 'application/json' };
+    if (state.token) { bh['X-Aichat-Token'] = state.token; } // header, not URL: URLs end up in server logs
+    return fetch(endpoint('boot', { url: location.href }), { credentials: 'same-origin', headers: bh })
       .then(function (r) { return r.json(); })
       .then(function (b) {
         state.booting = false;

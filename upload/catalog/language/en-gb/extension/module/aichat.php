@@ -106,3 +106,11 @@ $_['wait_minute_many']       = '%d minutes';
 $_['widget_img_caption']            = 'Photo';
 $_['widget_img_type']         = 'Only JPEG, PNG or WebP photos can be sent.';
 $_['widget_img_big']          = 'This photo is too large.';
+
+// security round (1.0.2)
+$_['error_forbidden'] = 'This request was refused. Please reload the page.';
+$_['error_busy'] = 'Many customers are chatting right now. Please try again in a moment.';
+$_['error_cost_limit'] = 'The chat limit for today has been reached. Please contact us directly: %s';
+$_['error_transcript_unavailable'] = 'The conversation can be e-mailed only to the address of your account or of an order checked in this chat.';
+$_['text_transcript_unavailable'] = 'You can e-mail the conversation to yourself after logging in to your account, or after checking an order in this chat (it then goes to the order’s e-mail address).';
+$_['widget_transcript_confirm'] = 'Send the conversation to %s?';

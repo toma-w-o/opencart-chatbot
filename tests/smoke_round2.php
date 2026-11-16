@@ -363,7 +363,8 @@ check('g_trust_cf_ip off: REMOTE_ADDR used', conv($bi['token'])['ip'] === '127.0
 setting(0, 'g_trust_cf_ip', 1);
 $bi = boot($s0);
 send($s0, $bi['token'], 'tool:list_categories {}', $s0, false);
-check('g_trust_cf_ip on: CF-Connecting-IP used', conv($bi['token'])['ip'] === '203.0.113.9');
+// 1.0.2: only believed when REMOTE_ADDR is one of Cloudflare's ranges (here it is 127.0.0.1)
+check('g_trust_cf_ip on: CF-Connecting-IP from a non-Cloudflare peer ignored', conv($bi['token'])['ip'] === '127.0.0.1');
 setting(0, 'g_trust_cf_ip', null);
 $GLOBALS['HEADERS'] = array();
 resetRates();

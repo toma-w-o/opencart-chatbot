@@ -51,6 +51,7 @@ class Settings {
 			'g_tg_translate'         => 0,
 			'g_tg_staff_lang'        => 'bg', // language the staff reads (code or name)
 			'g_tg_canned'            => array(), // list of {code, text}; staff types /code in the topic
+			'g_tg_staff_ids'         => array(), // numeric Telegram user ids allowed to take / answer chats (empty = every group member)
 			'g_report_weekly'        => 0,
 			'g_report_email'         => '',
 			'g_timezone'             => 'Europe/Sofia',
@@ -196,10 +197,20 @@ class Settings {
 		if ($key === null) {
 			$all = array_merge(self::globalDefaults(), $values);
 			unset($all['g_secret'], $all['g_warn_sent'], $all['g_report_week'], $all['g_cleanup_day']);
+			// write-only secret: never part of the whole-settings array (admin form, views)
+			$all['g_turnstile_secret'] = '';
 			return $this->cast($all);
 		}
 
 		$name = $this->normalise($key, 'g');
+
+		// Turnstile secret lives in a secret file (audit L2); the old setting is only a fallback before the upgrade moved it
+		if ($name === 'g_turnstile_secret') {
+			$secret = $this->getNamedSecret('turnstile');
+			if ($secret !== '') {
+				return $secret;
+			}
+		}
 
 		if (array_key_exists($name, $values)) {
 			return $this->castOne($name, $values[$name]);
@@ -250,6 +261,9 @@ class Settings {
 		foreach (self::internalKeys() as $internal) {
 			unset($allowed[$internal]);
 		}
+
+		// write-only, stored with setTurnstileSecret()
+		unset($allowed['g_turnstile_secret']);
 
 		foreach ($data as $key => $value) {
 			$name = $this->normalise($key, 'g');
@@ -502,6 +516,37 @@ class Settings {
 		return $ok;
 	}
 
+	/** Turnstile secret key (write-only like the API key); '' deletes it. */
+	public function setTurnstileSecret($value) {
+		return $this->setSecret('turnstile', $value);
+	}
+
+	public function hasTurnstileSecret() {
+		return trim((string)$this->getGlobal('g_turnstile_secret')) !== '';
+	}
+
+	/**
+	 * Schema 5: moves a Turnstile secret still stored as a setting into the
+	 * secret file and blanks the setting. Idempotent.
+	 */
+	public function migrateTurnstileSecret() {
+		$values = $this->load(0, 'g');
+		$old = isset($values['g_turnstile_secret']) ? trim((string)$values['g_turnstile_secret']) : '';
+
+		if ($old === '') {
+			return false;
+		}
+
+		if ($this->getNamedSecret('turnstile') === '' && !$this->setSecret('turnstile', $old)) {
+			return false;
+		}
+
+		$this->write(0, 'g_turnstile_secret', '');
+		$this->rows = null;
+
+		return true;
+	}
+
 	public function hasSecret($name) {
 		return $this->getNamedSecret($name) !== '';
 	}
@@ -669,6 +714,213 @@ class Settings {
 			return is_array($value) ? $value : array();
 		}
 
+		if ($name === 's_custom_css') {
+			return self::sanitizeCss(is_scalar($value) ? (string)$value : '');
+		}
+
 		return is_scalar($value) ? (string)$value : '';
+	}
+
+	// ---- custom CSS of the widget (audit I5) ----
+
+	/** Root class of the widget; every rule is scoped below it. */
+	const CSS_ROOT = '.aichat-root';
+
+	/**
+	 * Owner's custom CSS made safe for the storefront, on save and on output:
+	 * no markup, comments, escapes, @import / @font-face / other at-rules
+	 * (only @media, @supports, @keyframes), no external resources (url()
+	 * other than data: images, image-set(), expression(), javascript:,
+	 * behaviours, bindings) and every selector scoped inside the widget root
+	 * (no sibling combinators on the root, no ".aichat-rootX" look-alikes).
+	 */
+	public static function sanitizeCss($css) {
+		$css = (string)$css;
+
+		if (trim($css) === '') {
+			return '';
+		}
+
+		$css = function_exists('mb_substr') ? mb_substr($css, 0, 5000, 'UTF-8') : substr($css, 0, 5000);
+		$css = preg_replace('~/\*.*?(\*/|$)~s', '', $css);       // comments
+		$css = str_replace(array('<', '\\', "\r", "\0"), '', $css); // markup, CSS escapes ("u\72l(")
+
+		return trim(self::cssBlocks($css, 0));
+	}
+
+	private static function cssBlocks($str, $depth) {
+		$out = '';
+		$pos = 0;
+		$len = strlen($str);
+
+		while ($pos < $len) {
+			$open = strpos($str, '{', $pos);
+			if ($open === false) {
+				break;
+			}
+			$head = trim(substr($str, $pos, $open - $pos));
+			$level = 1;
+			$j = $open + 1;
+			while ($j < $len && $level > 0) {
+				if ($str[$j] === '{') {
+					$level++;
+				} elseif ($str[$j] === '}') {
+					$level--;
+				}
+				$j++;
+			}
+			$body = substr($str, $open + 1, max(0, $j - $open - 2));
+			$pos = $j;
+			// a head may carry leftovers of a broken previous rule ("a:b; .x")
+			if (strpos($head, ';') !== false) {
+				$head = trim(substr($head, strrpos($head, ';') + 1));
+			}
+			if ($head === '') {
+				continue;
+			}
+
+			if ($head[0] === '@') {
+				if ($depth < 2 && preg_match('/^@(media|supports)\b/i', $head) && !preg_match('/url\s*\(|expression|javascript/i', $head)) {
+					$inner = self::cssBlocks($body, $depth + 1);
+					if ($inner !== '') {
+						$out .= $head . '{' . $inner . '}';
+					}
+				} elseif (preg_match('/^@(-webkit-)?keyframes\s+[A-Za-z0-9_-]+$/i', $head)) {
+					$frames = '';
+					foreach (self::cssRules($body) as $rule) {
+						if (preg_match('/^(from|to|\d{1,3}(\.\d+)?%)(\s*,\s*(from|to|\d{1,3}(\.\d+)?%))*$/i', $rule[0])) {
+							$decl = self::cssDeclarations($rule[1]);
+							if ($decl !== '') {
+								$frames .= $rule[0] . '{' . $decl . '}';
+							}
+						}
+					}
+					if ($frames !== '') {
+						$out .= $head . '{' . $frames . '}';
+					}
+				}
+				continue;
+			}
+
+			$selectors = array();
+			foreach (explode(',', $head) as $sel) {
+				$sel = self::cssSelector($sel);
+				if ($sel !== '') {
+					$selectors[] = $sel;
+				}
+			}
+			$decl = self::cssDeclarations($body);
+			if ($selectors && $decl !== '') {
+				$out .= implode(', ', $selectors) . '{' . $decl . '}';
+			}
+		}
+
+		return $out;
+	}
+
+	/** Flat "selector { declarations }" pairs (keyframes). */
+	private static function cssRules($str) {
+		$out = array();
+
+		if (preg_match_all('/([^{}]+)\{([^{}]*)\}/', $str, $m, PREG_SET_ORDER)) {
+			foreach ($m as $r) {
+				$out[] = array(trim($r[1]), $r[2]);
+			}
+		}
+
+		return $out;
+	}
+
+	/** One selector scoped below the root, or '' when it cannot be made safe. */
+	private static function cssSelector($sel) {
+		$sel = trim(preg_replace('/\s+/', ' ', $sel));
+
+		if ($sel === '' || preg_match('/[@{}"\'`]|url\s*\(|expression|javascript/i', $sel)) {
+			return '';
+		}
+
+		// html / body / :root mean the widget root
+		$sel = preg_replace('/^(:root|html|body)(?![\w-])/i', self::CSS_ROOT, $sel);
+
+		if (strpos($sel, self::CSS_ROOT) === 0) {
+			$rest = (string)substr($sel, strlen(self::CSS_ROOT));
+			if ($rest !== '' && preg_match('/^[\w-]/', $rest)) {
+				// ".aichat-rootX" is another element: scope it like any selector
+				return self::CSS_ROOT . ' ' . $sel;
+			}
+			// the root's own compound (classes, pseudo, attributes) then a combinator
+			$compound = preg_match('/^((?:[.#:\[][^\s>+~]*)*)/', $rest, $cm) ? $cm[1] : '';
+			$after = ltrim((string)substr($rest, strlen($compound)));
+			if ($after !== '' && ($after[0] === '~' || $after[0] === '+')) {
+				return ''; // sibling of the root: outside the widget
+			}
+			if (preg_match('/:has\(|:not\(/i', $compound) && preg_match('/[~+]/', $compound)) {
+				return '';
+			}
+			return $sel;
+		}
+
+		return self::CSS_ROOT . ' ' . $sel;
+	}
+
+	/** Splits on ";" outside quotes and parentheses (data: URLs contain ";"). */
+	private static function splitDeclarations($body) {
+		$parts = array();
+		$cur = '';
+		$depth = 0;
+		$quote = '';
+
+		for ($i = 0, $n = strlen($body); $i < $n; $i++) {
+			$ch = $body[$i];
+			if ($quote !== '') {
+				if ($ch === $quote) {
+					$quote = '';
+				}
+			} elseif ($ch === '"' || $ch === "'") {
+				$quote = $ch;
+			} elseif ($ch === '(') {
+				$depth++;
+			} elseif ($ch === ')') {
+				$depth = max(0, $depth - 1);
+			} elseif ($ch === ';' && $depth === 0) {
+				$parts[] = $cur;
+				$cur = '';
+				continue;
+			}
+			$cur .= $ch;
+		}
+
+		$parts[] = $cur;
+
+		return $parts;
+	}
+
+	/** Declarations without external resources or script-like values. */
+	private static function cssDeclarations($body) {
+		$out = array();
+
+		foreach (self::splitDeclarations($body) as $decl) {
+			$decl = trim($decl);
+			if ($decl === '' || strpos($decl, ':') === false || preg_match('/[{}]/', $decl)) {
+				continue;
+			}
+			if (preg_match('/expression\s*\(|javascript:|vbscript:|behavior\s*:|-moz-binding|@import|image-set\s*\(|\bsrc\s*:/i', $decl)) {
+				continue;
+			}
+			if (preg_match_all('/url\s*\(\s*([^)]*)\)/i', $decl, $m)) {
+				$ok = true;
+				foreach ($m[1] as $u) {
+					if (!preg_match('~^["\']?data:image/(png|jpe?g|gif|webp|svg\+xml)[;,]~i', trim($u))) {
+						$ok = false;
+					}
+				}
+				if (!$ok) {
+					continue;
+				}
+			}
+			$out[] = $decl;
+		}
+
+		return implode(';', $out);
 	}
 }

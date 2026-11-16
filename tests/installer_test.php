@@ -159,7 +159,7 @@ $settings = new \Aichat\Settings($registry);
 $c = $settings->couriers();
 check('Speedy row gets the seed pattern + aliases, other rows untouched', $c['speedy']['pattern'] === '^6\\d{10}$' && in_array('Спиди', $c['speedy']['aliases'], true) && $c['econt']['pattern'] === '' && $c['econt']['track_url'] === 'https://www.econt.com/services/track-shipment/{number}', json_encode($c, JSON_UNESCAPED_UNICODE));
 check('NextLevel row seeded', isset($c['nextlevel']) && $c['nextlevel']['type'] === 'link' && $c['nextlevel']['hosts'] === array('nextlevel.delivery') && $c['nextlevel']['track_url'] === 'https://nextlevel.delivery/bg/track?awb={number}' && $c['nextlevel']['pattern'] === '^1000\\d{9}$');
-check('g_schema = 4, requests kept', (int)$settings->getGlobal('g_schema') === 4 && (int)$db->query("SELECT COUNT(*) AS n FROM `" . $p . "aichat_request`")->row['n'] === $requests);
+check('g_schema = ' . \Aichat\Installer::SCHEMA . ', requests kept', (int)$settings->getGlobal('g_schema') === \Aichat\Installer::SCHEMA && (int)$db->query("SELECT COUNT(*) AS n FROM `" . $p . "aichat_request`")->row['n'] === $requests);
 check('schema 4 upgrade again is a no-op', \Aichat\Installer::upgrade($registry) === false && count($settings->couriers()) === 3);
 // the owner deletes NextLevel: install() over schema 4 does not bring it back
 $settings->saveGlobal(array('g_couriers' => $old));

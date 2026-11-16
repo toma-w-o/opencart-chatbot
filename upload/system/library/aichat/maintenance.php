@@ -99,8 +99,26 @@ class Maintenance {
 		$db = $registry->get('db');
 		$uploads = new Uploads($registry);
 		$uploads->deleteForConversation((int)$conversationId);
+		self::forgetRequests($db, (int)$conversationId);
 		$db->query("DELETE FROM `" . DB_PREFIX . "aichat_message` WHERE `conversation_id` = '" . (int)$conversationId . "'");
 		$db->query("DELETE FROM `" . DB_PREFIX . "aichat_conversation` WHERE `conversation_id` = '" . (int)$conversationId . "'");
+	}
+
+	/**
+	 * Personal data in the conversation's requests (GDPR "forget"): contact and
+	 * stock-alert rows are deleted; order-related rows (return / order) keep
+	 * only order id, type, status and date - e-mail, phone and free text are
+	 * blanked, and the row is detached from the deleted conversation.
+	 */
+	public static function forgetRequests($db, $conversationId) {
+		$conversationId = (int)$conversationId;
+
+		if ($conversationId <= 0) {
+			return;
+		}
+
+		$db->query("DELETE FROM `" . DB_PREFIX . "aichat_request` WHERE `conversation_id` = '" . $conversationId . "' AND `type` NOT IN ('return', 'order')");
+		$db->query("UPDATE `" . DB_PREFIX . "aichat_request` SET `email` = '', `phone` = '', `product_id` = '0', `data` = '" . $db->escape(json_encode(array('forgotten' => true))) . "', `conversation_id` = '0' WHERE `conversation_id` = '" . $conversationId . "'");
 	}
 
 	// ---------------------------------------------------------------- weekly report

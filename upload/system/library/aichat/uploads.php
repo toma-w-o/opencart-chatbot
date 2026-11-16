@@ -17,7 +17,8 @@ class Uploads {
 	const MAX_BYTES = 5242880;      // 5 MB per file
 	const MAX_EDGE = 1568;          // px, longest edge sent to the model
 	const THUMB_EDGE = 240;
-	const MAX_PIXELS = 16000000;    // decoding guard (16 MP ~ 64 MB of GD memory; the widget sends <= 1568 px)
+	const MAX_PIXELS = 6000000;     // decoding guard (6 MP ~ 24 MB of GD memory; the widget sends <= 1568 px)
+	const MEMORY_SHARE = 0.7;       // never let one decode take memory_limit above this share
 	const MAX_PER_MESSAGE = 3;
 	const MAX_PER_CONVERSATION = 30;
 	const QUALITY = 85;
@@ -68,7 +69,7 @@ class Uploads {
 			return array('error' => 'bad_image');
 		}
 
-		if ((int)$info[0] * (int)$info[1] > self::MAX_PIXELS) {
+		if ((int)$info[0] * (int)$info[1] > self::MAX_PIXELS || !self::memoryFor((int)$info[0], (int)$info[1])) {
 			return array('error' => 'too_large');
 		}
 
@@ -116,6 +117,40 @@ class Uploads {
 		$this->db->query("INSERT INTO `" . DB_PREFIX . "aichat_upload` SET `conversation_id` = '" . (int)$conversationId . "', `file` = '" . $this->db->escape($name) . "', `mime` = 'image/jpeg', `bytes` = '" . (int)filesize($full) . "', `date_added` = NOW()");
 
 		return array('upload_id' => (int)$this->db->getLastId());
+	}
+
+	/** Enough memory to decode a w x h image (+ the resized copies) within MEMORY_SHARE of memory_limit. */
+	public static function memoryFor($w, $h) {
+		$limit = self::bytes(ini_get('memory_limit'));
+
+		if ($limit <= 0) {
+			return true;
+		}
+
+		$need = $w * $h * 5 + self::MAX_EDGE * self::MAX_EDGE * 5 + 2097152;
+
+		return memory_get_usage() + $need <= $limit * self::MEMORY_SHARE;
+	}
+
+	private static function bytes($value) {
+		$value = trim((string)$value);
+
+		if ($value === '' || $value === '-1') {
+			return -1;
+		}
+
+		$n = (float)$value;
+		$unit = strtolower(substr($value, -1));
+
+		if ($unit === 'g') {
+			$n *= 1073741824;
+		} elseif ($unit === 'm') {
+			$n *= 1048576;
+		} elseif ($unit === 'k') {
+			$n *= 1024;
+		}
+
+		return (int)$n;
 	}
 
 	/** JPEG FF D8 FF, PNG 89 50 4E 47 0D 0A 1A 0A, WebP RIFF....WEBP; anything else -> ''. */
@@ -302,7 +337,7 @@ class Uploads {
 		return count($rows);
 	}
 
-	/** Uninstall: every stored file. */
+	/** Uninstall: every stored file and the uploads directory itself. */
 	public static function deleteAllFiles() {
 		$dir = self::dir();
 
@@ -310,7 +345,78 @@ class Uploads {
 			foreach ((array)glob($month . '/*.jpg') as $file) {
 				@unlink($file);
 			}
+			@unlink($month . '/index.html');
 			@rmdir($month);
 		}
+
+		@unlink($dir . '.htaccess');
+		@unlink($dir . 'index.html');
+		@rmdir($dir);
+	}
+
+	/**
+	 * Uninstall, last step (after the key / secret files are gone): removes
+	 * DIR_STORAGE/aichat/ when only our .htaccess / index.html are left in it.
+	 * Returns true when the directory is gone.
+	 */
+	public static function removeStorageDir() {
+		$dir = rtrim(DIR_STORAGE, '/') . '/aichat';
+
+		if (!is_dir($dir)) {
+			return true;
+		}
+
+		self::deleteAllFiles();
+		$left = array_diff((array)scandir($dir), array('.', '..', '.htaccess', 'index.html'));
+
+		if ($left) {
+			return false;
+		}
+
+		@unlink($dir . '/.htaccess');
+		@unlink($dir . '/index.html');
+
+		return @rmdir($dir);
+	}
+
+	/**
+	 * Is the storage directory reachable from the web? For an admin warning.
+	 *
+	 *  - inside_webroot: DIR_STORAGE lies under the shop's document root
+	 *    (the directory that holds catalog/, admin/, system/);
+	 *  - http_readable: a probe file written to DIR_STORAGE/aichat/ could be
+	 *    downloaded through $baseUrl (true / false), or null when not checked
+	 *    (no base URL, no cURL, the shop cannot reach itself).
+	 *
+	 * @param string $baseUrl shop URL, e.g. HTTP_CATALOG ("https://shop.bg/")
+	 * @return array {inside_webroot, http_readable, storage, webroot}
+	 */
+	public static function storageExposure($baseUrl = '') {
+		$storage = realpath(DIR_STORAGE);
+		$app = defined('DIR_CATALOG') ? DIR_CATALOG : DIR_APPLICATION;
+		$webroot = realpath(rtrim($app, '/') . '/..');
+		$inside = $storage && $webroot && strpos(rtrim($storage, '/') . '/', rtrim($webroot, '/') . '/') === 0;
+		$readable = null;
+
+		if ($inside && $baseUrl !== '' && function_exists('curl_init')) {
+			$dir = rtrim(DIR_STORAGE, '/') . '/aichat';
+			if (is_dir($dir) || @mkdir($dir, 0700, true)) {
+				$name = 'probe_' . bin2hex(random_bytes(8)) . '.txt';
+				$marker = 'aichat-probe-' . bin2hex(random_bytes(8));
+				if (@file_put_contents($dir . '/' . $name, $marker) !== false) {
+					@chmod($dir . '/' . $name, 0644);
+					$rel = ltrim(substr(realpath($dir) . '/' . $name, strlen(rtrim($webroot, '/'))), '/');
+					$ch = curl_init(rtrim($baseUrl, '/') . '/' . $rel);
+					curl_setopt_array($ch, array(CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 3, CURLOPT_TIMEOUT => 5, CURLOPT_FOLLOWLOCATION => false));
+					$body = curl_exec($ch);
+					$code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+					curl_close($ch);
+					@unlink($dir . '/' . $name);
+					$readable = $body === false || $code === 0 ? null : ($code === 200 && strpos((string)$body, $marker) !== false);
+				}
+			}
+		}
+
+		return array('inside_webroot' => (bool)$inside, 'http_readable' => $readable, 'storage' => (string)$storage, 'webroot' => (string)$webroot);
 	}
 }

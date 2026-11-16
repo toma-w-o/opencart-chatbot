@@ -838,7 +838,10 @@ class Tools {
 			return array();
 		}
 
+		// ancestors only when they are enabled and in this store (audit I3)
 		$rows = $this->db->query("SELECT cp.category_id, cd.name FROM `" . DB_PREFIX . "category_path` cp"
+			. " JOIN `" . DB_PREFIX . "category` pc ON (pc.category_id = cp.path_id AND pc.status = '1')"
+			. " JOIN `" . DB_PREFIX . "category_to_store` pcs ON (pcs.category_id = cp.path_id AND pcs.store_id = '" . (int)$this->storeId . "')"
 			. " JOIN `" . DB_PREFIX . "category_description` cd ON (cd.category_id = cp.path_id AND cd.language_id = '" . (int)$this->languageId . "')"
 			. " WHERE cp.category_id IN (" . implode(',', $categoryIds) . ") ORDER BY cp.category_id, cp.level ASC")->rows;
 
@@ -874,7 +877,8 @@ class Tools {
 
 		$extra = $this->db->query("SELECT pd.description, m.name AS manufacturer FROM `" . DB_PREFIX . "product` p"
 			. " JOIN `" . DB_PREFIX . "product_description` pd ON (pd.product_id = p.product_id AND pd.language_id = '" . (int)$this->languageId . "')"
-			. " LEFT JOIN `" . DB_PREFIX . "manufacturer` m ON (m.manufacturer_id = p.manufacturer_id)"
+			. " LEFT JOIN `" . DB_PREFIX . "manufacturer_to_store` m2s ON (m2s.manufacturer_id = p.manufacturer_id AND m2s.store_id = '" . (int)$this->storeId . "')"
+			. " LEFT JOIN `" . DB_PREFIX . "manufacturer` m ON (m.manufacturer_id = m2s.manufacturer_id)"
 			. " WHERE p.product_id = '" . (int)$productId . "'")->row;
 
 		if (!empty($extra['manufacturer'])) {
@@ -1546,6 +1550,10 @@ class Tools {
 			return $generic;
 		}
 
+		if (!$this->orders->changeAllowed($order)) {
+			return $this->reconfirm();
+		}
+
 		$wanted = isset($input['product']) && is_string($input['product']) ? trim($input['product']) : '';
 		$lower = function ($s) {
 			return function_exists('mb_strtolower') ? mb_strtolower((string)$s, 'UTF-8') : strtolower((string)$s);
@@ -1667,6 +1675,10 @@ class Tools {
 			return $generic;
 		}
 
+		if (!$this->orders->changeAllowed($order)) {
+			return $this->reconfirm();
+		}
+
 		$kinds = array('cancel', 'items', 'address', 'other');
 		$kind = isset($input['kind']) && in_array($input['kind'], $kinds, true) ? $input['kind'] : 'other';
 		$details = isset($input['details']) && is_string($input['details']) ? $this->cut(trim($input['details']), 2000) : '';
@@ -1720,6 +1732,11 @@ class Tools {
 			'stage'      => $stage['stage'],
 			'message'    => 'The request was registered and sent to a colleague. Tell the customer warmly that you passed it on and a colleague will confirm it (by e-mail or phone). Do not say the order was changed or cancelled, and do not promise that it will be.' . ($stage['stage'] === 'shipped' ? ' The order has already been shipped, so say honestly that a change may no longer be possible; the colleague will check.' : ''),
 		);
+	}
+
+	/** A guest's phone must have been confirmed within Orders::VERIFY_IDLE before returns / order changes (audit L3). */
+	private function reconfirm() {
+		return array('ok' => false, 'reconfirm_phone' => true, 'message' => 'For the customer\'s safety the phone number of the order must be confirmed again before a request about this order: ask the customer for the phone number given in the order, call find_order with the order number and that phone, then call this tool again.');
 	}
 
 	private function testPrefix() {

@@ -17,13 +17,52 @@ class Guard {
 	/** Messages per IP per hour when the visitor's browser could not run Turnstile at all. */
 	const UNAVAILABLE_PER_HOUR = 20;
 	const WARN_RATIO = 0.8;
+	/** Messages per hour, whole store, from browsers that could not run Turnstile ("unavailable"). */
+	const UNAVAILABLE_STORE_HOUR = 60;
+	/** Failed order verifications per store per hour before the store counts as "under attack". */
+	const ORDER_FAIL_STORE_HOUR = 20;
+	/** While under attack: order checks per IP (/64) per hour for conversations without Turnstile. */
+	const ORDER_ATTEMPTS_UNDER_ATTACK = 2;
+	/** Cost caps (USD per calendar day). */
+	const CONV_COST_DAY = 0.5;
+	const IP_COST_DAY = 2.0;
+	/** Without a store budget: share of the global monthly budget one store may use per day / per month. */
+	const STORE_DAY_SHARE = 0.1;
+	const STORE_MONTH_SHARE = 0.5;
+	/** Concurrent model requests per store (MySQL GET_LOCK slots). */
+	const MAX_CONCURRENT = 4;
+	/** Lifetime of a signed image URL (seconds). */
+	const IMAGE_URL_TTL = 7200;
+
+	/** Cloudflare's published ranges (https://www.cloudflare.com/ips/), checked before CF-Connecting-IP is believed. */
+	public static function cloudflareRanges() {
+		return array(
+			'173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22', '141.101.64.0/18',
+			'108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22', '198.41.128.0/17',
+			'162.158.0.0/15', '104.16.0.0/13', '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22',
+			'2400:cb00::/32', '2606:4700::/32', '2803:f800::/32', '2405:b500::/32', '2405:8100::/32',
+			'2a06:98c0::/29', '2c0f:f248::/32',
+		);
+	}
 
 	private $db;
 	private $settings;
+	private $slots = array();
 
 	public function __construct($registry, Settings $settings = null) {
 		$this->db = $registry->get('db');
 		$this->settings = $settings ? $settings : new Settings($registry);
+	}
+
+	/** HMAC signature of a short-lived image URL (no conversation token in URLs). */
+	public function imageSig($uploadId, $expires, $thumb) {
+		$raw = hash_hmac('sha256', 'aichat|image|' . (int)$uploadId . '|' . (int)$expires . '|' . ($thumb ? 1 : 0), $this->settings->getSecret(), true);
+
+		return rtrim(strtr(base64_encode(substr($raw, 0, 16)), '+/', '-_'), '=');
+	}
+
+	public function checkImageSig($uploadId, $expires, $thumb, $sig) {
+		return is_string($sig) && (int)$expires >= time() && (int)$expires <= time() + self::IMAGE_URL_TTL + 60 && hash_equals($this->imageSig($uploadId, $expires, $thumb), $sig);
 	}
 
 	// ---------------------------------------------------------------- token
@@ -127,13 +166,14 @@ class Guard {
 	 */
 	public function checkMessage(array $store, $conversation, $publicId, $ip, $human = false, $storeId = 0) {
 		$perMinute = (int)$store['s_max_msgs_minute'];
+		$ipKey = self::rateIp($ip);
 
 		if (!$this->hit('m:c:' . $publicId, 60, $perMinute)) {
 			return 'rate_limited';
 		}
 
-		// Several tabs/visitors behind one IP: allow a few conversations' worth
-		if (!$human && !$this->hit('m:i:' . $ip, 60, $perMinute > 0 ? $perMinute * 3 : 0)) {
+		// Several tabs/visitors behind one IP (IPv6: one /64): allow a few conversations' worth
+		if (!$human && !$this->hit('m:i:' . $ipKey, 60, $perMinute > 0 ? $perMinute * 3 : 0)) {
 			return 'rate_limited';
 		}
 
@@ -141,13 +181,14 @@ class Guard {
 			return 'chat_limit';
 		}
 
-		if (!$conversation) {
-			// daily chat cap of the store (s_max_chats_day, 0 = off)
-			$cap = (int)$store['s_max_chats_day'];
-			if ($cap > 0 && $this->chatsToday($storeId) >= $cap) {
+		// a conversation created by an image upload counts as new until its first message
+		if (!$conversation || (int)$conversation['user_messages'] === 0) {
+			if (!$human && !$this->hit('c:i:' . $ipKey . ':' . date('Y-m-d'), 86400, self::IP_CHATS_DAY)) {
 				return 'chat_day_limit';
 			}
-			if (!$human && !$this->hit('c:i:' . $ip . ':' . date('Y-m-d'), 86400, self::IP_CHATS_DAY)) {
+			// daily chat cap of the store (s_max_chats_day, 0 = off): atomic counter, no read-then-write race
+			$cap = (int)$store['s_max_chats_day'];
+			if ($cap > 0 && ($this->chatsToday($storeId) >= $cap || !$this->hit('cap:s:' . (int)$storeId . ':' . date('Y-m-d'), 86400, $cap))) {
 				return 'chat_day_limit';
 			}
 		}
@@ -161,18 +202,127 @@ class Guard {
 		return $query->num_rows ? (int)$query->row['chats'] : 0;
 	}
 
-	/** Extra per-IP budget for visitors whose browser cannot run Turnstile. */
-	public function hitUnavailable($ip) {
-		return $this->hit('t:u:' . $ip, 3600, self::UNAVAILABLE_PER_HOUR);
+	/**
+	 * Visitors whose browser cannot run Turnstile: a per-IP (/64) budget AND a
+	 * small store-wide hourly budget, so the fallback cannot be used to skip
+	 * the challenge at scale.
+	 */
+	public function hitUnavailable($ip, $storeId = 0) {
+		return $this->hit('t:u:' . self::rateIp($ip), 3600, self::UNAVAILABLE_PER_HOUR)
+			&& $this->hit('t:u:s:' . (int)$storeId, 3600, self::UNAVAILABLE_STORE_HOUR);
+	}
+
+	// ---------------------------------------------------------------- order verification (store-wide safety)
+
+	/** Failed order verifications of this store in the current hour. */
+	public function orderFailures($storeId) {
+		return $this->amount('of:s:' . (int)$storeId, 3600);
+	}
+
+	/** Adds failed order verifications (the controller counts them per request). */
+	public function recordOrderFailures($storeId, $count) {
+		if ((int)$count > 0) {
+			$this->addAmount('of:s:' . (int)$storeId, 3600, (int)$count);
+		}
+	}
+
+	/** Many failed verifications this hour (spread over many IPs): stricter rules for unverified visitors. */
+	public function underOrderAttack($storeId) {
+		return $this->orderFailures($storeId) >= self::ORDER_FAIL_STORE_HOUR;
+	}
+
+	/**
+	 * For Orders::findOrder (before a guest check): true = may check now.
+	 * Normally always true (the per-IP / per-chat limits apply as before);
+	 * while the store is under attack, a conversation that has not passed
+	 * Turnstile gets ORDER_ATTEMPTS_UNDER_ATTACK checks per IP (/64) per hour.
+	 * Honest customers are slowed, never locked out shop-wide.
+	 */
+	public function orderGate($storeId, $ip, $conversation = null) {
+		if (!$this->underOrderAttack($storeId)) {
+			return true;
+		}
+
+		if (is_array($conversation) && isset($conversation['human_verified']) && (int)$conversation['human_verified'] === 1) {
+			return true;
+		}
+
+		return $this->hit('o:x:' . self::rateIp($ip), 3600, self::ORDER_ATTEMPTS_UNDER_ATTACK);
+	}
+
+	// ---------------------------------------------------------------- amounts (counters in aichat_rate)
+
+	/** Adds $n to a windowed counter (same table as the rate limits). */
+	public function addAmount($key, $window, $n) {
+		$start = (int)(floor(time() / $window) * $window);
+		$rateKey = $this->db->escape(substr(hash('sha256', $key), 0, 64));
+		$n = max(0, min(2000000000, (int)$n));
+
+		$this->db->query("INSERT INTO `" . DB_PREFIX . "aichat_rate` (`rate_key`, `window_start`, `hits`) VALUES ('" . $rateKey . "', '" . $start . "', " . $n . ")
+			ON DUPLICATE KEY UPDATE `hits` = IF(`window_start` = VALUES(`window_start`), LEAST(`hits` + VALUES(`hits`), 2000000000), VALUES(`hits`)), `window_start` = VALUES(`window_start`)");
+	}
+
+	/** Current value of a windowed counter (0 when the window has passed). */
+	public function amount($key, $window) {
+		$start = (int)(floor(time() / $window) * $window);
+		$query = $this->db->query("SELECT `hits` FROM `" . DB_PREFIX . "aichat_rate` WHERE `rate_key` = '" . $this->db->escape(substr(hash('sha256', $key), 0, 64)) . "' AND `window_start` = '" . $start . "'");
+
+		return $query->num_rows ? (int)$query->row['hits'] : 0;
+	}
+
+	// ---------------------------------------------------------------- concurrency slots
+
+	/**
+	 * One of MAX_CONCURRENT slots per store (MySQL GET_LOCK, released with
+	 * the DB connection at the latest). Returns false when all are taken.
+	 */
+	public function acquireSlot($storeId) {
+		$prefix = 'aichat_' . substr(md5((defined('DB_DATABASE') ? DB_DATABASE : '') . '|' . DB_PREFIX), 0, 10) . '_' . (int)$storeId . '_';
+		$order = range(1, self::MAX_CONCURRENT);
+		shuffle($order);
+
+		foreach ($order as $n) {
+			$name = $prefix . $n;
+			try {
+				$row = $this->db->query("SELECT GET_LOCK('" . $this->db->escape($name) . "', 0) AS got")->row;
+			} catch (\Exception $e) {
+				return true; // no named locks on this server: no cap rather than no chat
+			}
+			if (!$row || $row['got'] === null) {
+				return true;
+			}
+			if ((int)$row['got'] === 1) {
+				$this->slots[] = $name;
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	public function releaseSlots() {
+		foreach ($this->slots as $name) {
+			try {
+				$this->db->query("SELECT RELEASE_LOCK('" . $this->db->escape($name) . "')");
+			} catch (\Exception $e) {
+				// released with the connection anyway
+			}
+		}
+
+		$this->slots = array();
 	}
 
 	// ---------------------------------------------------------------- client ip
 
-	/** REMOTE_ADDR, or CF-Connecting-IP when g_trust_cf_ip is on (site behind Cloudflare). */
+	/**
+	 * REMOTE_ADDR, or CF-Connecting-IP when g_trust_cf_ip is on AND the request
+	 * really comes from Cloudflare (REMOTE_ADDR inside Cloudflare's ranges).
+	 * A client talking to the origin directly cannot choose its IP.
+	 */
 	public function clientIp(array $server) {
 		$ip = isset($server['REMOTE_ADDR']) ? (string)$server['REMOTE_ADDR'] : '';
 
-		if ((int)$this->settings->getGlobal('g_trust_cf_ip') && !empty($server['HTTP_CF_CONNECTING_IP'])) {
+		if ((int)$this->settings->getGlobal('g_trust_cf_ip') && !empty($server['HTTP_CF_CONNECTING_IP']) && self::fromCloudflare($ip)) {
 			$cf = trim((string)$server['HTTP_CF_CONNECTING_IP']);
 			if (filter_var($cf, FILTER_VALIDATE_IP)) {
 				$ip = $cf;
@@ -180,6 +330,65 @@ class Guard {
 		}
 
 		return substr($ip, 0, 45);
+	}
+
+	public static function fromCloudflare($ip) {
+		foreach (self::cloudflareRanges() as $cidr) {
+			if (self::ipInRange($ip, $cidr)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/** $ip inside $cidr (IPv4 or IPv6). */
+	public static function ipInRange($ip, $cidr) {
+		$parts = explode('/', (string)$cidr, 2);
+		$net = @inet_pton($parts[0]);
+		$addr = @inet_pton((string)$ip);
+
+		if ($net === false || $addr === false || strlen($net) !== strlen($addr)) {
+			return false;
+		}
+
+		$bits = isset($parts[1]) ? (int)$parts[1] : strlen($net) * 8;
+		$bytes = (int)floor($bits / 8);
+
+		if ($bytes && substr($net, 0, $bytes) !== substr($addr, 0, $bytes)) {
+			return false;
+		}
+
+		$rest = $bits % 8;
+
+		if ($rest) {
+			$mask = (0xFF << (8 - $rest)) & 0xFF;
+			return (ord($net[$bytes]) & $mask) === (ord($addr[$bytes]) & $mask);
+		}
+
+		return true;
+	}
+
+	/**
+	 * Key for per-IP limits: IPv4 as is, IPv6 cut to its /64 (one customer
+	 * line usually owns a whole /64), IPv4-mapped IPv6 as IPv4.
+	 */
+	public static function rateIp($ip) {
+		$ip = (string)$ip;
+		$bin = @inet_pton($ip);
+
+		if ($bin === false) {
+			return $ip;
+		}
+
+		if (strlen($bin) === 16) {
+			if (substr($bin, 0, 12) === str_repeat("\0", 10) . "\xFF\xFF") {
+				return inet_ntop(substr($bin, 12));
+			}
+			return inet_ntop(substr($bin, 0, 8) . str_repeat("\0", 8)) . '/64';
+		}
+
+		return $ip;
 	}
 
 	// ---------------------------------------------------------------- turnstile
@@ -248,8 +457,19 @@ class Guard {
 
 	// ---------------------------------------------------------------- budget
 
-	/** '' when an API call is allowed, otherwise 'budget'. Checked before every call. */
-	public function checkBudget($storeId) {
+	/**
+	 * '' when an API call is allowed, otherwise 'budget' (store / global money
+	 * is used up) or 'cost_limit' (this conversation / this IP spent its daily
+	 * share). Checked before every call.
+	 *
+	 *  - g_budget_month: all stores together;
+	 *  - s_budget_month: this store; when it is not set and there is a global
+	 *    budget, one store may use at most STORE_MONTH_SHARE of the global
+	 *    budget per month and STORE_DAY_SHARE per day, so abuse of one store
+	 *    cannot silence the others;
+	 *  - CONV_COST_DAY per conversation and IP_COST_DAY per IP (/64) per day.
+	 */
+	public function checkBudget($storeId, $conversationId = 0, $ip = '') {
 		$global = (float)$this->settings->getGlobal('g_budget_month');
 
 		if ($global > 0 && $this->monthCost(null) >= $global) {
@@ -262,7 +482,28 @@ class Guard {
 			return 'budget';
 		}
 
+		if ($store <= 0 && $global > 0) {
+			if ($this->monthCost($storeId) >= $global * self::STORE_MONTH_SHARE || $this->dayCost($storeId) >= $global * self::STORE_DAY_SHARE) {
+				return 'budget';
+			}
+		}
+
+		if ($conversationId && $this->amount('cost:c:' . (int)$conversationId . ':' . date('Y-m-d'), 86400) >= self::CONV_COST_DAY * 1000000) {
+			return 'cost_limit';
+		}
+
+		if ((string)$ip !== '' && $this->amount('cost:i:' . self::rateIp($ip) . ':' . date('Y-m-d'), 86400) >= self::IP_COST_DAY * 1000000) {
+			return 'cost_limit';
+		}
+
 		return '';
+	}
+
+	/** USD spent today by one store. */
+	public function dayCost($storeId) {
+		$query = $this->db->query("SELECT `cost` FROM `" . DB_PREFIX . "aichat_usage` WHERE `store_id` = '" . (int)$storeId . "' AND `day` = '" . date('Y-m-d') . "'");
+
+		return $query->num_rows ? (float)$query->row['cost'] : 0.0;
 	}
 
 	/**
@@ -401,11 +642,22 @@ class Guard {
 	 * Records one API call: daily usage row + conversation totals. Returns
 	 * array(prompt_tokens, output_tokens, cost).
 	 */
-	public function recordUsage($storeId, $conversationId, $usage, $light = false) {
+	public function recordUsage($storeId, $conversationId, $usage, $light = false, $ip = '') {
 		$t = self::tokens($usage);
 		$cost = $this->cost($usage, $light);
 
 		$this->bumpDay($storeId, 0, 0, $t['prompt'], $t['output'], $cost);
+
+		// daily cost counters (micro-USD) for the per-conversation / per-IP caps
+		$micro = (int)round($cost * 1000000);
+		if ($micro > 0) {
+			if ($conversationId) {
+				$this->addAmount('cost:c:' . (int)$conversationId . ':' . date('Y-m-d'), 86400, $micro);
+			}
+			if ((string)$ip !== '') {
+				$this->addAmount('cost:i:' . self::rateIp($ip) . ':' . date('Y-m-d'), 86400, $micro);
+			}
+		}
 
 		if ($conversationId) {
 			$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `input_tokens` = `input_tokens` + " . (int)$t['prompt'] . ", `output_tokens` = `output_tokens` + " . (int)$t['output'] . ", `cost` = `cost` + " . sprintf('%.6F', $cost) . " WHERE `conversation_id` = '" . (int)$conversationId . "'");

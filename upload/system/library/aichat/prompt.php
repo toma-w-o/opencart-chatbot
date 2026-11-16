@@ -168,11 +168,18 @@ You are the first line of help, and you can answer most questions yourself. Befo
 			$lines[] = "The visitor is not logged in (guest). For an order use find_order with the order number and phone number.";
 		}
 
-		if ((int)$verifiedOrderId > 0) {
-			$lines[] = "Order #" . (int)$verifiedOrderId . " was verified in this chat; you may call find_order / track_shipment for it again without asking for the phone.";
+		// only while the verification is fresh (Orders::VERIFY_IDLE); otherwise the phone is asked again
+		$orders = $this->tools->orders();
+		if ($orders) {
+			$verifiedOrderId = $orders->freshVerifiedOrderId();
 		}
 
-		$lines[] = "<page_context>\n" . PageContext::describeForPrompt($page) . "\n</page_context>";
+		if ((int)$verifiedOrderId > 0) {
+			$lines[] = "Order #" . (int)$verifiedOrderId . " was verified in this chat; you may call find_order / track_shipment for it again without asking for the phone. Before a return or change request the tool may ask you to confirm the phone again.";
+		}
+
+		// page context as delimited, escaped data - never as instructions (audit L1)
+		$lines[] = PageContext::describeForPrompt($page);
 
 		return implode("\n", $lines);
 	}

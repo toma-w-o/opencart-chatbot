@@ -7,9 +7,9 @@ namespace Aichat;
  */
 class Installer {
 	const EVENT_CODE = 'aichat';
-	const VERSION = '1.1.0';
+	const VERSION = '1.2.0';
 	/** Bump when a step is added to migrate(). */
-	const SCHEMA = 4;
+	const SCHEMA = 5;
 
 	/** Event list: trigger => action (all under code EVENT_CODE). */
 	public static function events() {
@@ -44,6 +44,9 @@ class Installer {
 			// once per install: an owner who later deletes the NextLevel row keeps it deleted
 			self::migrateCouriers($settings);
 		}
+
+		// 5: the Turnstile secret becomes write-only (secret file); idempotent
+		$settings->migrateTurnstileSecret();
 
 		self::registerEvents($registry);
 		$settings->setInternal('g_schema', self::SCHEMA);
@@ -85,6 +88,10 @@ class Installer {
 
 		// 4: e-mail outcome of a request
 		self::addColumn($db, 'aichat_request', 'mailed', "TINYINT(1) NULL DEFAULT NULL AFTER `status`");
+
+		// 5: a guest's order verification lapses (phone confirmed at / last used at)
+		self::addColumn($db, 'aichat_conversation', 'verified_at', "DATETIME NULL DEFAULT NULL AFTER `verified_order_id`");
+		self::addColumn($db, 'aichat_conversation', 'verified_seen_at', "DATETIME NULL DEFAULT NULL AFTER `verified_at`");
 	}
 
 	/**
@@ -166,24 +173,37 @@ class Installer {
 	}
 
 	/**
-	 * @param bool $dropData false keeps conversations, settings and the key file
+	 * OpenCart's "Uninstall": removes our events only. Conversations, requests,
+	 * uploads and the secret files stay (OpenCart itself deletes the
+	 * module_aichat settings rows). Deleting the data is a separate, typed
+	 * confirmation in the module settings (purge()), audit I6.
+	 *
+	 * @param bool $dropData true = purge() as well (tests / tooling only)
 	 */
-	public static function uninstall($registry, $dropData = true) {
+	public static function uninstall($registry, $dropData = false) {
 		self::unregisterEvents($registry);
 
 		if ($dropData) {
-			$db = $registry->get('db');
-			foreach (self::tables() as $table) {
-				$db->query("DROP TABLE IF EXISTS `" . DB_PREFIX . $table . "`");
-			}
-			Uploads::deleteAllFiles();
+			self::purge($registry);
+		}
 
-			$settings = new Settings($registry);
-			$settings->deleteAll();
-			$settings->setApiKey('');
-			foreach (array_merge((array)glob(dirname(Settings::keyFile()) . '/courier_*.php'), (array)glob(dirname(Settings::keyFile()) . '/secret_*.php')) as $file) {
-				@unlink($file);
-			}
+		return true;
+	}
+
+	/** Deletes every table, upload, setting and secret file of the module. */
+	public static function purge($registry) {
+		$db = $registry->get('db');
+
+		foreach (self::tables() as $table) {
+			$db->query("DROP TABLE IF EXISTS `" . DB_PREFIX . $table . "`");
+		}
+		Uploads::deleteAllFiles();
+
+		$settings = new Settings($registry);
+		$settings->deleteAll();
+		$settings->setApiKey('');
+		foreach (array_merge((array)glob(dirname(Settings::keyFile()) . '/courier_*.php'), (array)glob(dirname(Settings::keyFile()) . '/secret_*.php')) as $file) {
+			@unlink($file);
 		}
 
 		return true;

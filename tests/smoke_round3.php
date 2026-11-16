@@ -85,7 +85,11 @@ function webhook($base, $secretPath, $secretHeader, array $update) {
 }
 
 function pollc($base, $token, $after = 0) {
-	list($out) = http('GET', $base . 'index.php?route=extension/module/aichat/poll&token=' . rawurlencode($token) . '&after=' . (int)$after);
+	// 1.0.2: the token travels in the X-Aichat-Token header, never in the URL
+	$saved = isset($GLOBALS['HEADERS']) ? $GLOBALS['HEADERS'] : array();
+	$GLOBALS['HEADERS'] = array_merge($saved, array('X-Aichat-Token: ' . $token));
+	list($out) = http('GET', $base . 'index.php?route=extension/module/aichat/poll&after=' . (int)$after);
+	$GLOBALS['HEADERS'] = $saved;
 	return json_decode($out, true);
 }
 
@@ -176,7 +180,7 @@ $h = boot($s0, $ta);
 $withImg = array_values(array_filter($h['history'], function ($m) {
 	return !empty($m['images']);
 }));
-check('history: images [{id, thumb}] + message_id', $withImg && $withImg[0]['images'][0]['id'] === $u['id'] && strpos($withImg[0]['images'][0]['thumb'], 'thumb=1') !== false && isset($h['history'][0]['message_id']), json_encode($withImg));
+check('history: images [{id, thumb}] + message_id', $withImg && $withImg[0]['images'][0]['id'] === $u['id'] && strpos($withImg[0]['images'][0]['thumb'], '&t=1&s=') !== false && strpos($withImg[0]['images'][0]['thumb'], 'token=') === false && isset($h['history'][0]['message_id']), json_encode($withImg));
 $assistant = array_values(array_filter($h['history'], function ($m) {
 	return $m['role'] === 'assistant';
 }));
@@ -233,17 +237,23 @@ $GLOBALS['JAR'] = null;
 
 // ================================================================ transcript
 @unlink($mailFile);
-$r = post($s0, 'transcript', array('token' => $ta, 'email' => 'not-an-email'));
-check('transcript: invalid e-mail', isset($r['error']['code']) && $r['error']['code'] === 'invalid_email');
+// 1.0.2: only to the account e-mail or the e-mail of the order verified in this chat (no free address)
+$r = post($s0, 'transcript', array('token' => $ta, 'check' => 1));
+check('transcript: guest without a verified order -> not available', isset($r['available']) && $r['available'] === false && $r['message'] !== '', json_encode($r));
+$r = post($s0, 'transcript', array('token' => $ta, 'email' => 'visitor@example.com'));
+check('transcript: a free address is ignored, nothing mailed', isset($r['error']['code']) && $r['error']['code'] === 'transcript_unavailable' && strpos(mailText(), 'visitor@example.com') === false, json_encode($r));
+probe($s0, $ta, 'find_order', array('order_id' => '9001', 'phone' => '0888123456'));
+$r = post($s0, 'transcript', array('token' => $ta, 'check' => 1));
+check('transcript: verified order -> masked order e-mail offered', isset($r['available'], $r['masked']) && $r['available'] === true && $r['masked'] === 'i***@e***.com', json_encode($r));
 $r = post($s0, 'transcript', array('token' => $ta, 'email' => 'visitor@example.com'));
 $mail = mailText();
-check('transcript: mailed to the visitor', isset($r['ok']) && strpos($mail, 'To: visitor@example.com') !== false && strpos($mail, 'SAW 1 IMAGES') !== false && strpos($mail, '[1 image(s)]') !== false, json_encode($r) . "\n" . $mail);
-post($s0, 'transcript', array('token' => $ta, 'email' => 'visitor@example.com'));
-post($s0, 'transcript', array('token' => $ta, 'email' => 'visitor@example.com'));
-$r = post($s0, 'transcript', array('token' => $ta, 'email' => 'visitor@example.com'));
+check('transcript: mailed to the verified order\'s e-mail', isset($r['ok']) && strpos($mail, 'To: ivan9001@example.com') !== false && strpos($mail, 'visitor@example.com') === false && strpos($mail, 'SAW 1 IMAGES') !== false && strpos($mail, '[1 image(s)]') !== false && strpos($r['message'], 'ivan9001') === false, json_encode($r) . "\n" . $mail);
+post($s0, 'transcript', array('token' => $ta));
+post($s0, 'transcript', array('token' => $ta));
+$r = post($s0, 'transcript', array('token' => $ta));
 check('transcript: rate-limited (3 per conversation per day)', isset($r['error']['code']) && $r['error']['code'] === 'rate_limited', json_encode($r));
 $bn = boot($s0);
-$r = post($s0, 'transcript', array('token' => $bn['token'], 'email' => 'visitor@example.com'));
+$r = post($s0, 'transcript', array('token' => $bn['token']));
 check('transcript: no conversation -> not_found', isset($r['error']['code']) && $r['error']['code'] === 'not_found');
 
 // ================================================================ tools: stock alert, alternatives, comparison, misses, kb
@@ -497,7 +507,7 @@ list($v) = probe($s0, $to, 'leave_contact', array('email' => 'me@example.com', '
 $mail = mailText();
 $reqRow = q("SELECT * FROM oc_aichat_request WHERE type = 'contact' ORDER BY request_id DESC LIMIT 1")->fetch_assoc();
 check('leave_contact: request stored', $v && $v['ok'] === true && $reqRow['email'] === 'me@example.com' && $reqRow['phone'] === '0888 111 222' && (int)$reqRow['conversation_id'] === (int)$co['conversation_id'], json_encode(array($v, $reqRow)));
-check('leave_contact: transcript + contact mailed to the store', strpos($mail, 'To: shop0@example.com') !== false && strpos($mail, 'Subject: AI Chat: please contact the customer') !== false && strpos($mail, 'me@example.com') !== false && strpos($mail, 'complaint about delivery') !== false && strpos($mail, 'Visitor: tool:list_categories') !== false && strpos($mail, 'Reply-To: me@example.com') !== false, $mail);
+check('leave_contact: transcript + contact mailed to the store', strpos($mail, 'To: shop0@example.com') !== false && strpos($mail, 'Subject: AI Chat: please contact the customer') !== false && strpos($mail, 'me@example.com') !== false && strpos($mail, 'complaint about delivery') !== false && strpos($mail, 'Visitor (unverified): tool:list_categories') !== false && strpos($mail, 'Reply-To: me@example.com') !== false, $mail);
 list($v) = probe($s0, $to, 'leave_contact', array('note' => 'x'));
 check('leave_contact: needs an e-mail or phone', $v && $v['ok'] === false);
 

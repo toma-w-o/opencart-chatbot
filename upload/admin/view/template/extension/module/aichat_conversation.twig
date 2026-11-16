@@ -18,6 +18,7 @@
     {% if upgrade_pending %}<div class="alert alert-warning"><i class="fa fa-info-circle"></i> {{ text_upgrade_pending }}</div>{% endif %}
     <div class="row">
       <div class="col-md-8">
+        <div class="alert alert-info aichat-small"><i class="fa fa-user-secret"></i> {{ text_privacy_access }}</div>
         <div class="aichat-thread">
           {% for m in messages %}
           <div class="aichat-msg aichat-msg-{{ m.role }}{% if m.flagged %} is-flagged{% endif %}" data-message="{{ m.id }}">
@@ -31,7 +32,7 @@
             {% if m.content %}<div class="aichat-bubble">{{ m.content|e|nl2br }}</div>{% endif %}
             {% if m.images %}
             <div class="aichat-images">
-              {% for img in m.images %}<a href="{{ img.full }}" target="_blank" rel="noopener"><img src="{{ img.thumb }}" alt="" loading="lazy" /></a>{% endfor %}
+              {% for img in m.images %}<a href="{{ img.full }}" target="_blank" rel="noopener noreferrer"><img src="{{ img.thumb }}" alt="" loading="lazy" /></a>{% endfor %}
             </div>
             {% endif %}
             {% if m.kb_id %}<div class="aichat-ctx"><i class="fa fa-book"></i> <a href="{{ kb_url }}&filter_q=">{{ text_kb_already }}</a> #{{ m.kb_id }}</div>{% endif %}
@@ -39,7 +40,7 @@
             {% if m.page_type or m.url %}
             <div class="aichat-ctx"><i class="fa fa-map-marker"></i> {{ text_page_context }}:
               {% if m.page_type %}<b>{{ m.page_type|e }}</b>{% if m.page_title %} &ldquo;{{ m.page_title|e }}&rdquo;{% endif %}{% if m.page_id %} (id {{ m.page_id|e }}){% endif %}{% endif %}
-              {% if m.url %}<a href="{{ m.url|e('html_attr') }}" target="_blank" rel="noopener" class="aichat-url">{{ m.url|e }}</a>{% endif %}
+              {% if m.url %}<a href="{{ m.url|e('html_attr') }}" target="_blank" rel="noopener noreferrer" class="aichat-url">{{ m.url|e }}</a>{% endif %}
             </div>
             {% endif %}
 
@@ -50,7 +51,7 @@
             {% endif %}
             {% if m.cards %}
             <div class="aichat-cards">
-              {% for c in m.cards %}<span class="aichat-card-chip is-link"><i class="fa fa-link"></i> {% if c.type %}<small>{{ c.type|e }}</small> {% endif %}{% if c.href %}<a href="{{ c.href|e('html_attr') }}" target="_blank" rel="noopener">{{ c.title|e }}</a>{% else %}{{ c.title|e }}{% endif %}</span>{% endfor %}
+              {% for c in m.cards %}<span class="aichat-card-chip is-link"><i class="fa fa-link"></i> {% if c.type %}<small>{{ c.type|e }}</small> {% endif %}{% if c.href %}<a href="{{ c.href|e('html_attr') }}" target="_blank" rel="noopener noreferrer">{{ c.title|e }}</a>{% else %}{{ c.title|e }}{% endif %}</span>{% endfor %}
             </div>
             {% endif %}
 
@@ -100,7 +101,7 @@
               <dt>{{ text_cost }}</dt><dd><b>{{ conv.cost }}</b></dd>
               <dt>IP</dt><dd>{{ conv.ip|e }}</dd>
               <dt>{{ text_browser }}</dt><dd class="aichat-small">{{ conv.ua|e }}</dd>
-              {% if conv.first_url %}<dt>{{ text_first_page }}</dt><dd class="aichat-small"><a href="{{ conv.first_url|e('html_attr') }}" target="_blank" rel="noopener">{{ conv.first_url|e }}</a></dd>{% endif %}
+              {% if conv.first_url %}<dt>{{ text_first_page }}</dt><dd class="aichat-small"><a href="{{ conv.first_url|e('html_attr') }}" target="_blank" rel="noopener noreferrer">{{ conv.first_url|e }}</a></dd>{% endif %}
             </dl>
             <div data-conversation="{{ conv.id }}" data-message="0" class="aichat-convflag{% if conv.flagged %} is-flagged{% endif %}">
               <button type="button" class="btn btn-sm aichat-flag-btn {{ conv.flagged ? 'btn-danger' : 'btn-default' }}"><i class="fa fa-flag"></i> {{ text_flag_conversation }}</button>

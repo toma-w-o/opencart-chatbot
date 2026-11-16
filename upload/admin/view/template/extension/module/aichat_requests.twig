@@ -73,8 +73,8 @@
                 <div class="col-sm-6">
                   <dl class="aichat-dl">
                     {% if r.conversation %}<dt>{{ text_conversation }}</dt><dd><a href="{{ r.conversation_url }}"><i class="fa fa-comments-o"></i> #{{ r.conversation }}</a></dd>{% elseif r.conversation_gone %}<dt>{{ text_conversation }}</dt><dd class="aichat-muted">{{ text_rq_conv_deleted }}</dd>{% endif %}
-                    {% if r.order_id %}<dt>{{ text_order }}</dt><dd><a href="{{ r.order_url }}" target="_blank" rel="noopener"><i class="fa fa-shopping-cart"></i> #{{ r.order_id }}</a></dd>{% endif %}
-                    {% if r.product_id %}<dt>{{ text_product }}</dt><dd><a href="{{ r.product_url }}" target="_blank" rel="noopener">{{ r.product|e }}</a> <span class="aichat-muted">#{{ r.product_id }}</span></dd>{% endif %}
+                    {% if r.order_id %}<dt>{{ text_order }}</dt><dd><a href="{{ r.order_url }}" target="_blank" rel="noopener noreferrer"><i class="fa fa-shopping-cart"></i> #{{ r.order_id }}</a></dd>{% endif %}
+                    {% if r.product_id %}<dt>{{ text_product }}</dt><dd><a href="{{ r.product_url }}" target="_blank" rel="noopener noreferrer">{{ r.product|e }}</a> <span class="aichat-muted">#{{ r.product_id }}</span></dd>{% endif %}
                     {% if r.email %}<dt>{{ entry_email }}</dt><dd>{{ r.email|e }}</dd>{% endif %}
                     {% if r.phone %}<dt>{{ entry_phone }}</dt><dd>{{ r.phone|e }}</dd>{% endif %}
                     {% if r.mailed == 1 %}<dt>{{ text_rq_mail }}</dt><dd class="text-success"><i class="fa fa-check"></i> {{ text_rq_mail_sent }} {{ r.mail_to|e }}</dd>{% elseif r.mailed == 0 %}<dt>{{ text_rq_mail }}</dt><dd class="text-danger"><i class="fa fa-exclamation-triangle"></i> {{ text_rq_mail_failed }}{% if r.mail_to %} ({{ r.mail_to|e }}){% endif %}: {{ r.mail_error|e }}</dd>{% endif %}
@@ -82,9 +82,9 @@
                 </div>
                 <div class="col-sm-6">
                   <dl class="aichat-dl">
-                    {% for fl in r.fields %}<dt>{{ fl.label|e }}</dt><dd>{% if fl.url %}<a href="{{ fl.url|e('html_attr') }}" target="_blank" rel="noopener" class="aichat-small">{{ fl.value|e }}</a>{% else %}{{ fl.value|e|nl2br }}{% endif %}</dd>{% endfor %}
+                    {% for fl in r.fields %}<dt>{{ fl.label|e }}</dt><dd>{% if fl.url %}<a href="{{ fl.url|e('html_attr') }}" target="_blank" rel="noopener noreferrer" class="aichat-small">{{ fl.value|e }}</a>{% else %}{{ fl.value|e|nl2br }}{% endif %}</dd>{% endfor %}
                   </dl>
-                  {% if r.images %}<div class="aichat-images">{% for img in r.images %}<a href="{{ img.full }}" target="_blank" rel="noopener"><img src="{{ img.thumb }}" alt="" loading="lazy" /></a>{% endfor %}</div>{% endif %}
+                  {% if r.images %}<div class="aichat-images">{% for img in r.images %}<a href="{{ img.full }}" target="_blank" rel="noopener noreferrer"><img src="{{ img.thumb }}" alt="" loading="lazy" /></a>{% endfor %}</div>{% endif %}
                 </div>
               </div>
             </td></tr>

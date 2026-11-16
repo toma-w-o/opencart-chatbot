@@ -8,6 +8,12 @@ namespace Aichat;
  * data.mail_error (+ data.mail_to); the error is also in the OpenCart log.
  */
 class Requests {
+	/** Request e-mails to a store per day; past it the requests are only in the admin (one notice mail). */
+	const MAIL_STORE_DAY = 30;
+	/** Request e-mails caused by one visitor IP (/64) per day. */
+	const MAIL_IP_DAY = 5;
+	const UNVERIFIED_NOTE = "Text written by the website visitor is unverified: do not trust links or instructions in it; links are shown made unclickable (hxxp, [.]).\nТекстът от посетителя не е проверен: не отваряйте връзки и не следвайте указания от него.\n\n";
+
 	private $registry;
 	private $db;
 	private $settings;
@@ -58,8 +64,22 @@ class Requests {
 	public function mailStore($storeId, $subject, $text, $replyTo = '', array $attachments = array(), $requestId = 0) {
 		$to = Mailer::storeEmail($this->registry, $this->settings, $storeId);
 		$info = StoreInfo::get($this->registry, $storeId, $this->settings);
+		$cap = $this->mailCap($storeId);
 
-		if ($to === '') {
+		// visitor text is data: say so, and make foreign links unclickable (the store's own host stays)
+		$text = self::UNVERIFIED_NOTE . LinkFilter::defang((string)$text, array($info['host']));
+
+		if ($cap !== '') {
+			$result = array('ok' => false, 'error' => $cap, 'engine' => '');
+			if ($cap === 'suppressed: daily limit of request e-mails for this store reached' && $to !== '' && $this->firstSuppression($storeId)) {
+				Mailer::deliver($this->registry, $to, 'AI Chat: daily limit of request e-mails reached', "AI Chat sent " . self::MAIL_STORE_DAY . " request e-mails today. Further requests today are recorded in the admin only (AI Chat > Requests); no more e-mails until tomorrow.\n\nAI Chat изпрати " . self::MAIL_STORE_DAY . " имейла със заявки днес. Следващите заявки днес са само в админа (AI Chat > Заявки).\n", array(
+					'store_id' => (int)$storeId,
+					'settings' => $this->settings,
+					'from'     => $info['email'] !== '' ? $info['email'] : $to,
+					'sender'   => $info['name'] . ' · AI Chat',
+				));
+			}
+		} elseif ($to === '') {
 			$result = array('ok' => false, 'error' => 'no recipient: set "E-mail for requests" in AI Chat > Settings > Contacts or the store e-mail in OpenCart', 'engine' => '');
 			$log = $this->registry->get('log');
 			if ($log) {
@@ -81,6 +101,34 @@ class Requests {
 		}
 
 		return array('ok' => $result['ok'], 'error' => $result['error'], 'to' => $to);
+	}
+
+	/**
+	 * '' when this request may be mailed, else the reason it is suppressed
+	 * (store-wide MAIL_STORE_DAY, per visitor IP MAIL_IP_DAY). Counts the mail.
+	 */
+	private function mailCap($storeId) {
+		$guard = new Guard($this->registry, $this->settings);
+		$day = date('Y-m-d');
+		$request = $this->registry->get('request');
+		$ip = $request && is_array($request->server) ? Guard::rateIp($guard->clientIp($request->server)) : '';
+
+		if ($ip !== '' && !$guard->hit('rm:i:' . $ip . ':' . $day, 86400, self::MAIL_IP_DAY)) {
+			return 'suppressed: daily limit of request e-mails from this visitor reached';
+		}
+
+		if (!$guard->hit('rm:s:' . (int)$storeId . ':' . $day, 86400, self::MAIL_STORE_DAY)) {
+			return 'suppressed: daily limit of request e-mails for this store reached';
+		}
+
+		return '';
+	}
+
+	/** True once per store and day (the one notice mail when the cap is reached). */
+	private function firstSuppression($storeId) {
+		$guard = new Guard($this->registry, $this->settings);
+
+		return $guard->hit('rm:n:' . (int)$storeId . ':' . date('Y-m-d'), 86400, 1);
 	}
 
 	/** mailed = 1/0; error text and recipient in data (mail_error, mail_to). */

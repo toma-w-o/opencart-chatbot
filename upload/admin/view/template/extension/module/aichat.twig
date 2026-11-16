@@ -21,6 +21,8 @@
       <button type="button" class="close" data-dismiss="alert">&times;</button>
     </div>
     {% endif %}
+    {% if storage_exposed %}<div class="alert alert-danger"><i class="fa fa-exclamation-triangle"></i> {{ text_storage_exposed }}{% if storage_exposed_url %} <code>{{ storage_exposed_url|e }}</code>{% endif %}</div>{% endif %}
+    <div class="alert alert-info"><i class="fa fa-user-secret"></i> {{ text_privacy_access }}</div>
     {% if success %}
     <div class="alert alert-success alert-dismissible"><i class="fa fa-check-circle"></i> {{ success }}
       <button type="button" class="close" data-dismiss="alert">&times;</button>
@@ -174,7 +176,8 @@
                   <label class="col-sm-2 control-label" for="input-g-ts-site">{{ entry_turnstile_site }}</label>
                   <div class="col-sm-4"><input type="text" name="g[g_turnstile_site]" value="{{ g.g_turnstile_site|e('html_attr') }}" id="input-g-ts-site" class="form-control" /></div>
                   <label class="col-sm-2 control-label" for="input-g-ts-secret">{{ entry_turnstile_secret }}</label>
-                  <div class="col-sm-4"><input type="text" name="g[g_turnstile_secret]" value="{{ g.g_turnstile_secret|e('html_attr') }}" id="input-g-ts-secret" class="form-control" autocomplete="off" /></div>
+                  <div class="col-sm-4"><input type="password" name="ts_secret" value="" placeholder="{{ ts_has_secret ? text_saved : text_key_not_set }}" id="input-g-ts-secret" class="form-control" autocomplete="new-password" />
+                    {% if ts_has_secret %}<label class="aichat-switch" style="margin-top:6px"><input type="checkbox" name="ts_secret_clear" value="1" /> {{ text_ts_secret_clear }}</label>{% endif %}</div>
                   <div class="col-sm-offset-2 col-sm-10"><div class="help-block">{{ help_turnstile }}</div></div>
                 </div>
               </fieldset>
@@ -336,6 +339,25 @@
                     </select>
                   </div>
                   <div class="col-sm-offset-2 col-sm-10"><div class="help-block">{{ help_tg_translate }}</div></div>
+                </div>
+              </fieldset>
+
+              <fieldset>
+                <legend>{{ text_tg_staff_ids }}</legend>
+                <div class="form-group">
+                  <label class="col-sm-2 control-label" for="input-tg-staff-ids">{{ entry_tg_staff_ids }}</label>
+                  <div class="col-sm-4">
+                    <textarea name="g[g_tg_staff_ids]" rows="4" id="input-tg-staff-ids" class="form-control aichat-mono" placeholder="123456789">{{ tg_staff_ids|e }}</textarea>
+                    {% if errors.tg_staff_ids %}<div class="text-danger">{{ errors.tg_staff_ids }}</div>{% endif %}
+                  </div>
+                  <div class="col-sm-6">
+                    <div class="help-block">{{ help_tg_staff_ids }}</div>
+                    {% if tg_takers %}
+                    <table class="table table-condensed aichat-small"><thead><tr><th>{{ text_tg_taker }}</th><th>ID</th><th>{{ text_date }}</th></tr></thead><tbody>
+                      {% for t in tg_takers %}<tr><td>{{ t.name|e }}</td><td><code>{{ t.id|e }}</code></td><td>{{ t.date|e }}</td></tr>{% endfor %}
+                    </tbody></table>
+                    {% endif %}
+                  </div>
                 </div>
               </fieldset>
 
@@ -832,6 +854,18 @@
       </div>
     </div>
     </form>
+    {% if can_modify %}
+    <div class="panel panel-danger aichat-card" id="aichat-purge">
+      <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-trash"></i> {{ text_purge_title }}</h3></div>
+      <div class="panel-body">
+        <p>{{ text_purge_help }}</p>
+        <form action="{{ purge_action }}" method="post" class="form-inline">
+          <div class="form-group"><input type="text" name="confirm" value="" class="form-control" placeholder="{{ purge_word }}" autocomplete="off" /></div>
+          <button type="submit" class="btn btn-danger"><i class="fa fa-trash"></i> {{ button_purge }}</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
   </div>
 </div>
 {{ footer }}

@@ -407,6 +407,37 @@ class ModelExtensionModuleAichat extends Model {
 		return (bool)$this->db->query("SELECT 1 FROM " . $this->t('conversation') . " WHERE `conversation_id` = '" . (int)$id . "'")->num_rows;
 	}
 
+	/**
+	 * Staff who took chats recently (system messages with meta.handover = take):
+	 * {name, id, date}, newest first, one row per name + id. The id is
+	 * meta.staff_id (numeric Telegram user id) when the handover logged it.
+	 */
+	public function getRecentTakers($limit = 10) {
+		$out = array();
+
+		if (!$this->hasTable('message')) {
+			return $out;
+		}
+
+		foreach ($this->db->query("SELECT `meta`, `date_added` FROM " . $this->t('message') . " WHERE `role` = 'system' AND `meta` LIKE '%\"handover\":\"take\"%' ORDER BY `message_id` DESC LIMIT 200")->rows as $row) {
+			$meta = json_decode((string)$row['meta'], true);
+			if (!is_array($meta)) {
+				continue;
+			}
+			$name = isset($meta['staff_name']) ? (string)$meta['staff_name'] : '';
+			$id = isset($meta['staff_id']) && preg_match('/^\d{1,15}$/', (string)$meta['staff_id']) ? (string)$meta['staff_id'] : '';
+			$key = $name . '|' . $id;
+			if (!isset($out[$key])) {
+				$out[$key] = array('name' => $name, 'id' => $id !== '' ? $id : '?', 'date' => (string)$row['date_added']);
+			}
+			if (count($out) >= (int)$limit) {
+				break;
+			}
+		}
+
+		return array_values($out);
+	}
+
 	// ---- test chat ----
 
 	public function savePreview($previewId, $storeId, $url, array $data) {

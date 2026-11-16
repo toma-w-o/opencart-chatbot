@@ -173,7 +173,8 @@ class Mailer {
 		$log = $registry->get('log');
 
 		if ($log) {
-			$log->write('AI Chat mail not sent (' . $engine . '): ' . $error);
+			// no recipient / sender addresses in the OpenCart error log (it may be web-readable)
+			$log->write('AI Chat mail not sent (' . $engine . '): ' . self::maskAddresses($error));
 		}
 
 		return array('ok' => false, 'error' => (string)$error, 'engine' => (string)$engine);
@@ -188,7 +189,33 @@ class Mailer {
 	public static function storeConfig($registry, $storeId, Settings $settings = null) {
 		$info = StoreInfo::get($registry, $storeId, $settings ? $settings : new Settings($registry));
 
-		return array('name' => $info['name'], 'email' => $info['email'], 'url' => $info['url']);
+		return array('name' => $info['name'], 'email' => $info['email'], 'url' => $info['url'], 'host' => $info['host']);
+	}
+
+	/** "jane@example.com" -> "[address]" (for log lines). */
+	public static function maskAddresses($text) {
+		return preg_replace('/[^\s<>()"\',;:]+@[^\s<>()"\',;:]+/u', '[address]', (string)$text);
+	}
+
+	/** "jane.doe@example.com" -> "j***@e***.com" (shown to the visitor before a transcript is sent). */
+	public static function maskEmail($email) {
+		$email = (string)$email;
+		$at = strrpos($email, '@');
+
+		if ($at === false) {
+			return '';
+		}
+
+		$local = substr($email, 0, $at);
+		$domain = substr($email, $at + 1);
+		$dot = strrpos($domain, '.');
+		$name = $dot === false ? $domain : substr($domain, 0, $dot);
+		$tld = $dot === false ? '' : substr($domain, $dot);
+		$first = function ($s) {
+			return function_exists('mb_substr') ? mb_substr($s, 0, 1, 'UTF-8') : substr($s, 0, 1);
+		};
+
+		return $first($local) . '***@' . $first($name) . '***' . $tld;
 	}
 
 	public static function oneLine($text) {

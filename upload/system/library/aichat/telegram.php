@@ -147,9 +147,13 @@ class Telegram {
 		)) !== null;
 	}
 
-	/** Webhook URL for a catalog base URL (e.g. "https://shop.bg/"). */
+	/**
+	 * Webhook URL for a catalog base URL (e.g. "https://shop.bg/"). The secret
+	 * travels only in Telegram's X-Telegram-Bot-Api-Secret-Token header, never
+	 * in the URL (URLs end up in access logs).
+	 */
 	public function webhookUrl($catalogUrl) {
-		return rtrim((string)$catalogUrl, '/') . '/index.php?route=extension/module/aichat/telegram&s=' . rawurlencode($this->settings->telegramSecret());
+		return rtrim((string)$catalogUrl, '/') . '/index.php?route=extension/module/aichat/telegram';
 	}
 
 	/** Admin "send test" button: a message to the group (or the store's group). */

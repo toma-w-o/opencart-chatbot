@@ -76,11 +76,13 @@ class Handover {
 		}
 
 		$reason = Telegram::cut(trim(preg_replace('/\s+/u', ' ', (string)$reason)), 300);
+		$own = array($storeInfo['host']);
 		$head = "🙋 " . $storeInfo['name'] . " · chat " . $cid . "\n"
-			. ($reason !== '' ? "Reason: " . $reason . "\n" : '')
-			. "Page: " . $conversation['last_url'] . "\n"
-			. "Language: " . $this->languageName((int)$conversation['language_id']) . "\n\n";
-		$transcript = self::transcript($this->db, $cid, self::TRANSCRIPT_LINES);
+			. ($reason !== '' ? "Reason: " . LinkFilter::defang($reason, $own) . "\n" : '')
+			. "Page: " . LinkFilter::defang((string)$conversation['last_url'], $own) . "\n"
+			. "Language: " . $this->languageName((int)$conversation['language_id']) . "\n"
+			. "(Visitor text is unverified; links are made unclickable.)\n\n";
+		$transcript = LinkFilter::defang(self::transcript($this->db, $cid, self::TRANSCRIPT_LINES), $own);
 
 		if ($this->translating()) {
 			$transcript = $this->translate($transcript, $this->staffLanguage(), $storeId, $cid);
@@ -135,7 +137,8 @@ class Handover {
 					$out = $translated . "\n\n(" . $text . ")";
 				}
 			}
-			$this->telegram->sendMessage($chatId, $topic, "👤 " . $out);
+			$own = array(StoreInfo::get($this->registry, (int)$conversation['store_id'], $this->settings)['host']);
+			$this->telegram->sendMessage($chatId, $topic, "👤 Visitor (unverified):\n" . LinkFilter::defang($out, $own));
 		}
 
 		foreach ($imageRows as $row) {
@@ -294,10 +297,18 @@ class Handover {
 			return 'ignored';
 		}
 
-		$name = self::staffName(isset($cb['from']) ? $cb['from'] : array());
+		$from = isset($cb['from']) && is_array($cb['from']) ? $cb['from'] : array();
+
+		if (!$this->staffAllowed($from)) {
+			$this->telegram->answerCallback($cbId, 'Not allowed. Ask the shop owner to add your Telegram id ' . (isset($from['id']) ? (int)$from['id'] : 0) . ' to the AI Chat staff list.');
+			$this->log('Telegram user id ' . (isset($from['id']) ? (int)$from['id'] : 0) . ' is not on the staff list (button ignored)');
+			return 'forbidden';
+		}
+
+		$name = self::staffName($from);
 
 		if ($m[1] === 'take') {
-			$result = $this->take($conversation, $name);
+			$result = $this->take($conversation, $name, isset($from['id']) ? (int)$from['id'] : 0);
 			$this->telegram->answerCallback($cbId, $result === 'take' ? 'You took the chat' : 'Already taken by ' . $conversation['staff_name']);
 			return $result;
 		}
@@ -328,7 +339,20 @@ class Handover {
 			return 'ignored';
 		}
 
-		$name = self::staffName(isset($msg['from']) ? $msg['from'] : array());
+		$from = isset($msg['from']) && is_array($msg['from']) ? $msg['from'] : array();
+		$fromId = isset($from['id']) ? (int)$from['id'] : 0;
+
+		if (!$this->staffAllowed($from)) {
+			// one short notice per user and day; nothing reaches the visitor
+			$guard = new Guard($this->registry, $this->settings);
+			if ($guard->hit('tg:deny:' . $fromId . ':' . date('Y-m-d'), 86400, 1)) {
+				$this->telegram->sendMessage($chatId, $thread, 'Only staff on the AI Chat list can answer visitors. Your Telegram id: ' . $fromId . ' (the shop owner can add it in AI Chat > Settings > Telegram).');
+			}
+			$this->log('Telegram user id ' . $fromId . ' is not on the staff list (message ignored)');
+			return 'forbidden';
+		}
+
+		$name = self::staffName($from);
 		$isCanned = false;
 
 		if (preg_match('/^\/([a-z0-9_]{1,32})(@\w+)?(\s|$)/i', $text, $cmd)) {
@@ -340,7 +364,7 @@ class Handover {
 			}
 
 			if ($command === 'take') {
-				return $this->take($conversation, $name);
+				return $this->take($conversation, $name, $fromId);
 			}
 
 			$canned = $this->canned($command);
@@ -356,7 +380,7 @@ class Handover {
 
 		if ($conversation['mode'] !== 'human') {
 			// writing in the topic takes the chat
-			$this->take($conversation, $name);
+			$this->take($conversation, $name, $fromId);
 			$conversation['mode'] = 'human';
 		}
 
@@ -378,17 +402,19 @@ class Handover {
 	}
 
 	/** Take: mode human, "<name> joined". Returns take|taken. */
-	public function take(array $conversation, $name) {
+	public function take(array $conversation, $name, $telegramUserId = 0) {
 		if ($conversation['mode'] === 'human' && $conversation['staff_name'] !== '' && $conversation['staff_name'] !== $name) {
 			return 'taken';
 		}
 
 		$cid = (int)$conversation['conversation_id'];
+		// the owner finds staff ids for g_tg_staff_ids here
+		$this->log('chat ' . $cid . ' taken by Telegram user id ' . (int)$telegramUserId . ' (' . $name . ')');
 		$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `mode` = 'human', `waiting_since` = NULL, `staff_name` = '" . $this->db->escape(Telegram::cut($name, 64)) . "', `date_modified` = NOW() WHERE `conversation_id` = '" . $cid . "'");
 
 		if ($conversation['mode'] !== 'human') {
 			$strings = self::strings($this->db, (int)$conversation['language_id']);
-			$this->addMessage($cid, 'system', sprintf($strings['handover_joined'], $name), array('handover' => 'take', 'staff_name' => $name));
+			$this->addMessage($cid, 'system', sprintf($strings['handover_joined'], $name), array('handover' => 'take', 'staff_name' => $name, 'staff_tg_id' => (int)$telegramUserId));
 			if ((string)$conversation['tg_chat_id'] !== '' && (int)$conversation['tg_topic_id']) {
 				$this->telegram->sendMessage((string)$conversation['tg_chat_id'], (int)$conversation['tg_topic_id'], "✋ " . $name . " took the chat. Write here to answer; /done or the Done button returns it to the bot.");
 			}
@@ -410,6 +436,33 @@ class Handover {
 				$this->telegram->sendMessage((string)$conversation['tg_chat_id'], (int)$conversation['tg_topic_id'], "✅ " . $name . ": chat returned to the bot.");
 			}
 		}
+	}
+
+	/**
+	 * g_tg_staff_ids (Telegram user ids, list or comma separated): empty =
+	 * everyone in the configured group is staff; otherwise only those users.
+	 */
+	public function staffAllowed(array $from) {
+		$ids = self::staffIds($this->settings->getGlobal('g_tg_staff_ids', array()));
+
+		if (!$ids) {
+			return true;
+		}
+
+		return isset($from['id']) && in_array((string)(int)$from['id'], $ids, true);
+	}
+
+	public static function staffIds($value) {
+		$list = is_array($value) ? $value : preg_split('/[\s,;]+/', (string)$value, -1, PREG_SPLIT_NO_EMPTY);
+		$out = array();
+
+		foreach ($list as $id) {
+			if (is_scalar($id) && preg_match('/^-?\d{1,20}$/', trim((string)$id))) {
+				$out[] = (string)(int)trim((string)$id);
+			}
+		}
+
+		return array_values(array_unique($out));
 	}
 
 	// ================================================================ canned replies
@@ -498,9 +551,13 @@ class Handover {
 
 	// ================================================================ helpers
 
-	/** Plain-text transcript of a conversation (oldest first, last $limit messages). */
-	public static function transcript($db, $conversationId, $limit = 200, array $labels = array()) {
-		$labels += array('user' => 'Visitor', 'assistant' => 'Assistant', 'staff' => 'Staff', 'system' => '—');
+	/**
+	 * Plain-text transcript of a conversation (oldest first, last $limit
+	 * messages). Visitor lines are labelled as unverified by default; with
+	 * $filter (LinkFilter) every line goes through the link filter.
+	 */
+	public static function transcript($db, $conversationId, $limit = 200, array $labels = array(), LinkFilter $filter = null) {
+		$labels += array('user' => 'Visitor (unverified)', 'assistant' => 'Assistant', 'staff' => 'Staff', 'system' => '—');
 		$rows = $db->query("SELECT `role`, `content`, `meta`, `date_added` FROM `" . DB_PREFIX . "aichat_message` WHERE `conversation_id` = '" . (int)$conversationId . "' ORDER BY `message_id` DESC LIMIT " . (int)$limit)->rows;
 		$lines = array();
 
@@ -511,6 +568,9 @@ class Handover {
 				$who .= ' (' . $meta['staff_name'] . ')';
 			}
 			$text = trim((string)$row['content']);
+			if ($filter) {
+				$text = trim($filter->filter($text));
+			}
 			if (!empty($meta['images']) && is_array($meta['images'])) {
 				$text .= ($text !== '' ? ' ' : '') . '[' . count($meta['images']) . ' image(s)]';
 			}

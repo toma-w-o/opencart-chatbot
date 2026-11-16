@@ -50,13 +50,13 @@
 	function cards(r) {
 		var h = '';
 		$.each(r.products || [], function (i, p) {
-			h += '<a class="aichat-tc-product' + (p.label === 'suggestion' ? ' is-suggestion' : '') + '"' + (p.href ? ' href="' + esc(p.href) + '" target="_blank" rel="noopener"' : '') + '>' +
+			h += '<a class="aichat-tc-product' + (p.label === 'suggestion' ? ' is-suggestion' : '') + '"' + (p.href ? ' href="' + esc(p.href) + '" target="_blank" rel="noopener noreferrer"' : '') + '>' +
 				(p.image ? '<img src="' + esc(p.image) + '" alt="">' : '<span class="aichat-tc-noimg"><i class="fa fa-cube"></i></span>') +
 				'<span class="aichat-tc-pname">' + esc(p.name) + '</span><span class="aichat-tc-price">' + (p.special ? '<s>' + esc(p.price) + '</s> <b>' + esc(p.special) + '</b>' : esc(p.price)) + '</span>' +
 				(p.label === 'suggestion' ? '<span class="aichat-tc-sug">' + esc(T.suggestion) + '</span>' : '') + '</a>';
 		});
 		$.each(r.cards || [], function (i, c) {
-			h += '<a class="aichat-tc-link"' + (c.href ? ' href="' + esc(c.href) + '" target="_blank" rel="noopener"' : '') + '>' + (c.image ? '<img src="' + esc(c.image) + '" alt="">' : '<i class="fa fa-link"></i>') +
+			h += '<a class="aichat-tc-link"' + (c.href ? ' href="' + esc(c.href) + '" target="_blank" rel="noopener noreferrer"' : '') + '>' + (c.image ? '<img src="' + esc(c.image) + '" alt="">' : '<i class="fa fa-link"></i>') +
 				'<span><small>' + esc(c.type) + '</small> ' + esc(c.title) + (c.subtitle ? '<br><small>' + esc(c.subtitle) + '</small>' : '') + '</span></a>';
 		});
 

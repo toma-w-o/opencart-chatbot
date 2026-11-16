@@ -24,7 +24,7 @@ $cases = array(
 	array('relative kept', 'Open [cart](index.php?route=checkout/cart).', 'Open [cart](index.php?route=checkout/cart).'),
 	array('protocol relative foreign', 'x //evil.com/a y', 'x  y'),
 	array('md label is foreign url', '[https://evil.com](https://evil.com)', ''),
-	array('javascript scheme', '[click](javascript:alert(1))', '[click](javascript:alert(1))'),
+	array('javascript scheme (removed: target with parentheses)', '[click](javascript:alert(1))', 'click'),
 	array('numbers untouched', 'Price 12.50 lv, size 3.5kg, v1.2', 'Price 12.50 lv, size 3.5kg, v1.2'),
 	array('subdomain foreign', 'see shop.evil.co for more', 'see  for more'),
 	array('other store same db not allowed', 'also fitball.bg', 'also '),

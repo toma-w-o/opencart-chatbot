@@ -495,3 +495,18 @@ $_['rq_field_status'] = 'Order status';
 $_['rq_field_verified'] = 'Verified';
 $_['rq_field_mail_to'] = 'E-mailed to';
 $_['tool_order_change_request'] = 'Order change request';
+
+// 1.2.0 (security round)
+$_['text_ts_secret_clear'] = 'Delete the saved secret key';
+$_['text_storage_exposed'] = 'The AI Chat storage folder can be opened from the web (API key files, uploaded customer photos). Move OpenCart\'s storage folder outside the web root (System > Maintenance offers this) or deny it in the web server configuration.';
+$_['text_privacy_access'] = 'Privacy: everyone with access to AI Chat in Users > User Groups can read the full conversations, including the names, addresses, phone numbers and photos customers shared - independently of the permission for Sales > Orders. Give the AI Chat permission only to people who may see this data.';
+$_['text_tg_staff_ids'] = 'Who may answer';
+$_['entry_tg_staff_ids'] = 'Telegram user ids of the staff';
+$_['help_tg_staff_ids'] = 'One numeric Telegram user id per line. When the list is not empty, only these people can take, answer and close chats; messages and buttons from other members of the group are ignored. Empty = every member of the group. To find an id: let the person press "Take" on a chat once - the table below lists recent takers with their id - or ask them to message @userinfobot in Telegram.';
+$_['text_tg_taker'] = 'Recently took a chat';
+$_['error_tg_staff_ids'] = 'Only numeric Telegram user ids, one per line.';
+$_['text_purge_title'] = 'Delete all AI Chat data';
+$_['text_purge_help'] = 'OpenCart\'s "Uninstall" button only switches the module off and keeps the conversations, requests, knowledge base, uploaded photos and keys. To delete all of them permanently, type DELETE and press the button. This cannot be undone.';
+$_['button_purge'] = 'Delete everything';
+$_['error_purge_confirm'] = 'Nothing was deleted: type DELETE (capital letters) to confirm.';
+$_['text_purged'] = 'All AI Chat data was deleted. The module starts again with empty tables and default settings.';

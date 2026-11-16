@@ -21,8 +21,20 @@ class Client {
 	const API_VERSION = '2026-10-21';
 	const DEFAULT_BASE = 'https://api.anthropic.com';
 	const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
-	const MAX_TOOL_ROUNDS = 6;
-	const MAX_TOKENS = 16000;
+	/**
+	 * Rounds with tools per visitor message; one more round answers without
+	 * tools, so at most MAX_TOOL_ROUNDS + 1 API calls per message.
+	 */
+	const MAX_TOOL_ROUNDS = 4;
+	/**
+	 * Output budget per API call, adaptive thinking included. A shop reply is
+	 * 1-4 sentences plus a few tool calls; 3000 leaves room for thinking at
+	 * effort "low" and caps the cost of one call (audit M1).
+	 */
+	const MAX_TOKENS = 3000;
+	/** Tool calls executed per model turn / per visitor message; the rest get an error result (audit M2). */
+	const MAX_TOOLS_PER_TURN = 8;
+	const MAX_TOOLS_PER_MESSAGE = 16;
 	const RETRIES = 2;
 
 	private $apiKey;
@@ -80,6 +92,7 @@ class Client {
 		$toolCalls = array();
 		$stopReason = '';
 		$rounds = 0;
+		$toolCount = 0;
 		$pendingSeparator = false;
 
 		$onText = null;
@@ -125,7 +138,7 @@ class Client {
 				$body['output_config'] = array('effort' => $this->effort);
 			}
 
-			if ($round === self::MAX_TOOL_ROUNDS) {
+			if ($round === self::MAX_TOOL_ROUNDS || $toolCount >= self::MAX_TOOLS_PER_MESSAGE) {
 				// last round: answer with what we have
 				$body['tool_choice'] = array('type' => 'none');
 			}
@@ -136,8 +149,11 @@ class Client {
 
 			$response = $this->request($body, $stream, $onText);
 
-			if (isset($hooks['usage']) && !empty($response['message']['usage'])) {
-				call_user_func($hooks['usage'], $response['message']['usage']);
+			// every attempt that consumed tokens is priced, retried / failed ones too (audit L5)
+			if (isset($hooks['usage'])) {
+				foreach ($response['usages'] as $usage) {
+					call_user_func($hooks['usage'], $usage);
+				}
 			}
 
 			if (!$response['ok']) {
@@ -175,10 +191,21 @@ class Client {
 			}
 
 			$results = array();
+			$turnCount = 0;
 
 			foreach ($uses as $use) {
 				$name = isset($use['name']) ? (string)$use['name'] : '';
 				$id = isset($use['id']) ? (string)$use['id'] : '';
+
+				// every tool_use needs a tool_result, but only the first few are executed (audit M2)
+				if ($turnCount >= self::MAX_TOOLS_PER_TURN || $toolCount >= self::MAX_TOOLS_PER_MESSAGE) {
+					$toolCalls[] = array('name' => $name, 'input' => isset($use['input']) ? $use['input'] : null, 'is_error' => true, 'skipped' => true);
+					$results[] = array('type' => 'tool_result', 'tool_use_id' => $id, 'content' => json_encode(array('error' => 'not executed: too many tool calls (at most ' . self::MAX_TOOLS_PER_TURN . ' per turn and ' . self::MAX_TOOLS_PER_MESSAGE . ' per customer message). Answer with what you have.')), 'is_error' => true);
+					continue;
+				}
+
+				$turnCount++;
+				$toolCount++;
 
 				if (isset($use['_invalid_json'])) {
 					$out = array('content' => json_encode(array('INVALID_JSON' => $use['_invalid_json'])), 'is_error' => true);
@@ -227,7 +254,7 @@ class Client {
 		}
 
 		$response = $this->request($body, false);
-		$usage = isset($response['message']['usage']) && is_array($response['message']['usage']) ? $response['message']['usage'] : array();
+		$usage = self::sumUsage($response['usages']);
 
 		if (!$response['ok']) {
 			return array('text' => '', 'usage' => $usage, 'error' => $response['error']);
@@ -294,10 +321,17 @@ class Client {
 			};
 		}
 
+		$usages = array();
+
 		while (true) {
 			$response = $stream ? $this->streamOnce($body, $wrapped) : $this->createOnce($body);
 
+			if (!empty($response['message']['usage']) && is_array($response['message']['usage'])) {
+				$usages[] = $response['message']['usage'];
+			}
+
 			if ($response['ok'] || $emitted || $attempt >= self::RETRIES || !$this->retryable($response)) {
+				$response['usages'] = $usages;
 				return $response;
 			}
 
@@ -305,6 +339,21 @@ class Client {
 			$wait = isset($response['retry_after']) && $response['retry_after'] > 0 ? min(5, (int)$response['retry_after']) : $attempt * 2 - 1;
 			sleep($wait);
 		}
+	}
+
+	/** Sum of several usage objects (numeric fields added, nested objects ignored). */
+	public static function sumUsage(array $usages) {
+		$sum = array();
+
+		foreach ($usages as $usage) {
+			foreach (is_array($usage) ? $usage : array() as $k => $v) {
+				if (is_int($v) || is_float($v)) {
+					$sum[$k] = (isset($sum[$k]) ? $sum[$k] : 0) + $v;
+				}
+			}
+		}
+
+		return $sum;
 	}
 
 	private function retryable(array $response) {

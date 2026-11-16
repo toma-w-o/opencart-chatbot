@@ -145,8 +145,76 @@ if (is_array($last['content'])) {
 
 $id = 'msg_' . substr(md5(uniqid('', true)), 0, 12);
 
+// ---- security probes (audit M1/M2/L5); only for visitor texts that start with these prefixes
+// "many:<n> <tool> <json>"  one turn with n tool_use blocks, then "MANY executed=.. skipped=.."
+// "loop:<n> <tool> <json>"  n tool_use blocks every turn until tool_choice none, then "LOOP calls=.. results=.. skipped=.."
+// "long:<n>"                 n output tokens wanted: usage.output_tokens = min(n, max_tokens), "LONG max_tokens=.."
+// "midfail"                  stream: the first attempt dies after message_start (usage 777 in), the retry answers "RECOVERED"
+$probeTail = preg_match('/(?:^|\n)(many|loop):(\d+) (\w+) (\{.*\})\s*$/s', $visitor, $sp) ? $sp : null;
+$turnResults = 0;
+$turnSkipped = 0;
+$turnCalls = 0;
+for ($k = count($messages) - 1; $k >= 0; $k--) {
+	$m = $messages[$k];
+	if ($m['role'] === 'user' && !is_array($m['content'])) {
+		break;
+	}
+	if ($m['role'] === 'user' && is_array($m['content']) && $m['content'] && $m['content'][0]['type'] !== 'tool_result') {
+		break;
+	}
+	foreach (is_array($m['content']) ? $m['content'] : array() as $block) {
+		if ($block['type'] === 'tool_result') {
+			$turnResults++;
+			if (strpos((string)$block['content'], 'not executed') !== false) {
+				$turnSkipped++;
+			}
+		} elseif ($block['type'] === 'tool_use') {
+			$turnCalls++;
+		}
+	}
+}
+$forcedEnd = isset($body['tool_choice']['type']) && $body['tool_choice']['type'] === 'none';
+$special = null;
+if ($probeTail) {
+	$n = max(1, min(500, (int)$probeTail[2]));
+	$again = $probeTail[1] === 'loop' || $lastToolResult === null;
+	if ($forcedEnd || !$again) {
+		$special = array(array(array('type' => 'text', 'text' => strtoupper($probeTail[1]) . ' calls=' . $turnCalls . ' results=' . $turnResults . ' executed=' . ($turnResults - $turnSkipped) . ' skipped=' . $turnSkipped . ' max_tokens=' . $body['max_tokens'])), 'end_turn', 40);
+	} else {
+		$input = json_decode($probeTail[4], true);
+		$blocks = array();
+		for ($k = 0; $k < $n; $k++) {
+			$blocks[] = array('type' => 'tool_use', 'id' => 'toolu_' . substr(md5($id . $k), 0, 10), 'name' => $probeTail[3], 'input' => $input ? $input : new stdClass());
+		}
+		$special = array($blocks, 'tool_use', 20 * $n);
+	}
+} elseif (preg_match('/(?:^|\n)long:(\d+)\s*$/', $visitor, $lp) && $lastToolResult === null) {
+	$want = (int)$lp[1];
+	$out = min($want, (int)$body['max_tokens']);
+	$special = array(array(array('type' => 'text', 'text' => 'LONG max_tokens=' . $body['max_tokens'] . ' output=' . $out)), $want > $out ? 'max_tokens' : 'end_turn', $out);
+} elseif (preg_match('/(?:^|\n)midfail\s*$/', $visitor) && $lastToolResult === null) {
+	$stateFile = sys_get_temp_dir() . '/fake_midfail_' . md5(json_encode($messages));
+	if (!is_file($stateFile)) {
+		file_put_contents($stateFile, '1');
+		if (!empty($body['stream'])) {
+			header('Content-Type: text/event-stream');
+			echo "event: message_start\ndata: " . json_encode(array('type' => 'message_start', 'message' => array('id' => $id, 'type' => 'message', 'role' => 'assistant', 'model' => $body['model'], 'content' => array(), 'stop_reason' => null, 'usage' => array('input_tokens' => 777, 'output_tokens' => 1)))) . "\n\n";
+			echo "event: error\ndata: " . json_encode(array('type' => 'error', 'error' => array('type' => 'overloaded_error', 'message' => 'Overloaded'))) . "\n\n";
+			exit;
+		}
+		http_response_code(529);
+		echo '{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}';
+		exit;
+	}
+	@unlink($stateFile);
+	$special = array(array(array('type' => 'text', 'text' => 'RECOVERED')), 'end_turn', 5);
+}
+
 // Direct tool probe: visitor text "tool:<name> <json input>" -> call it, then echo the result
-if (preg_match('/tool:(\w+) (\{.*\})\s*$/s', $visitor, $probe)) {
+if ($special !== null) {
+	$content = $special[0];
+	$stop = $special[1];
+} elseif (preg_match('/tool:(\w+) (\{.*\})\s*$/s', $visitor, $probe)) {
 	$say = preg_match('/^SAY\[(.*?)\]\s/s', $visitor, $sm) ? $sm[1] . "\n" : '';
 	if ($lastToolResult === null) {
 		$input = json_decode($probe[2], true);
@@ -185,7 +253,7 @@ if (preg_match('/tool:(\w+) (\{.*\})\s*$/s', $visitor, $probe)) {
 	$stop = 'end_turn';
 }
 
-$usage = array('input_tokens' => 120, 'cache_creation_input_tokens' => 2000, 'cache_read_input_tokens' => 0, 'output_tokens' => 40);
+$usage = array('input_tokens' => 120, 'cache_creation_input_tokens' => 2000, 'cache_read_input_tokens' => 0, 'output_tokens' => $special !== null ? (int)$special[2] : 40);
 if (count($messages) > 1) {
 	$usage['cache_creation_input_tokens'] = 100;
 	$usage['cache_read_input_tokens'] = 2000;

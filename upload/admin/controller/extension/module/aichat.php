@@ -55,6 +55,8 @@ class ControllerExtensionModuleAichat extends Controller {
 
 	private function pageData($active) {
 		$this->load->language('extension/module/aichat');
+		// admin URLs carry user_token: never send them as Referer to visitor-supplied links (audit I2)
+		$this->response->addHeader('Referrer-Policy: same-origin');
 
 		$data = array();
 		foreach (array_keys($this->strings()) as $k) {
@@ -122,6 +124,7 @@ class ControllerExtensionModuleAichat extends Controller {
 
 	private function json($payload) {
 		$this->response->addHeader('Content-Type: application/json');
+		$this->response->addHeader('Referrer-Policy: same-origin');
 		$this->response->setOutput(json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP));
 	}
 
@@ -367,6 +370,13 @@ class ControllerExtensionModuleAichat extends Controller {
 			if ($key !== '') {
 				$settings->setApiKey($key);
 			}
+			// Turnstile secret: write-only like the API key (audit L2)
+			$tsSecret = isset($post['ts_secret']) ? trim($post['ts_secret']) : '';
+			if ($tsSecret !== '') {
+				$settings->setTurnstileSecret($tsSecret);
+			} elseif (!empty($post['ts_secret_clear'])) {
+				$settings->setTurnstileSecret('');
+			}
 			if (method_exists($settings, 'setSecret')) {
 				$tgToken = isset($post['tg_token']) ? trim($post['tg_token']) : '';
 				if ($tgToken !== '') {
@@ -397,6 +407,10 @@ class ControllerExtensionModuleAichat extends Controller {
 		}
 
 		$data['error_warning'] = isset($this->error['warning']) ? $this->error['warning'] : '';
+		if ($data['error_warning'] === '' && !empty($this->session->data['aichat_warning'])) {
+			$data['error_warning'] = $this->session->data['aichat_warning'];
+		}
+		unset($this->session->data['aichat_warning']);
 		$data['errors'] = $this->error;
 
 		if (isset($this->session->data['success'])) {
@@ -417,8 +431,28 @@ class ControllerExtensionModuleAichat extends Controller {
 		}
 		$g['g_warn_email'] = isset($g['g_warn_email']) ? $g['g_warn_email'] : '';
 		$g['g_trust_cf_ip'] = !empty($g['g_trust_cf_ip']) ? 1 : 0;
+		$g['g_turnstile_secret'] = ''; // write-only, never rendered
 		$data['g'] = $g;
 		$data['has_key'] = $settings->hasApiKey();
+		$data['ts_has_secret'] = $settings->hasTurnstileSecret();
+		$data['can_modify'] = $this->user->hasPermission('modify', 'extension/module/aichat');
+		$data['purge_action'] = $this->url->link('extension/module/aichat/purge', 'user_token=' . $this->session->data['user_token'], true);
+		$data['purge_word'] = self::PURGE_WORD;
+
+		// Telegram staff ids: one per line; recent takers from the transcripts
+		$staffIds = isset($g['g_tg_staff_ids']) ? $g['g_tg_staff_ids'] : array();
+		$data['tg_staff_ids'] = is_array($staffIds) ? implode("\n", array_map('strval', $staffIds)) : (string)$staffIds;
+		$this->load->model('extension/module/aichat');
+		$data['tg_takers'] = $this->model_extension_module_aichat->getRecentTakers(10);
+
+		// storage directory reachable from the web (helper of the uploads library, when present)
+		$data['storage_exposed'] = false;
+		$data['storage_exposed_url'] = '';
+		if (class_exists('\\Aichat\\Uploads') && method_exists('\\Aichat\\Uploads', 'storageExposed')) {
+			$exposed = \Aichat\Uploads::storageExposed($this->registry);
+			$data['storage_exposed'] = (bool)$exposed;
+			$data['storage_exposed_url'] = is_string($exposed) ? $exposed : '';
+		}
 
 		// Telegram (round 3): token is write-only
 		$data['tg_supported'] = class_exists('\\Aichat\\Telegram') && method_exists($settings, 'setSecret');
@@ -515,7 +549,6 @@ class ControllerExtensionModuleAichat extends Controller {
 		$out['g_budget_month'] = (float)$this->num(isset($in['g_budget_month']) ? $in['g_budget_month'] : 0);
 		$out['g_warn_email'] = isset($in['g_warn_email']) ? trim($in['g_warn_email']) : '';
 		$out['g_turnstile_site'] = isset($in['g_turnstile_site']) ? trim($in['g_turnstile_site']) : '';
-		$out['g_turnstile_secret'] = isset($in['g_turnstile_secret']) ? trim($in['g_turnstile_secret']) : '';
 		$out['g_trust_cf_ip'] = empty($in['g_trust_cf_ip']) ? 0 : 1;
 		$out['g_retention_months'] = (int)(isset($in['g_retention_months']) ? $in['g_retention_months'] : 12);
 		$out['g_image_retention_days'] = (int)(isset($in['g_image_retention_days']) ? $in['g_image_retention_days'] : 30);
@@ -531,6 +564,7 @@ class ControllerExtensionModuleAichat extends Controller {
 		$out['g_report_weekly'] = empty($in['g_report_weekly']) ? 0 : 1;
 		$out['g_report_email'] = isset($in['g_report_email']) ? trim($in['g_report_email']) : '';
 		$out['g_tg_canned'] = array_values($this->cleanCanned(isset($in['g_tg_canned']) ? $in['g_tg_canned'] : array()));
+		$out['g_tg_staff_ids'] = $this->staffIds(isset($in['g_tg_staff_ids']) ? $in['g_tg_staff_ids'] : '');
 		$post = $this->post();
 		$out['g_couriers'] = array_values($this->cleanCouriers(isset($post['couriers']) ? $post['couriers'] : array()));
 
@@ -562,6 +596,19 @@ class ControllerExtensionModuleAichat extends Controller {
 				'pattern'   => trim(isset($row['pattern']) ? (string)$row['pattern'] : ''),
 				'aliases'   => array_values(array_unique(array_filter(array_map('trim', preg_split('/[,;\n]+/u', isset($row['aliases']) ? (string)$row['aliases'] : ''))))),
 			);
+		}
+
+		return $out;
+	}
+
+	/** Telegram user ids, one per line (or comma separated): unique numeric strings. */
+	private function staffIds($raw) {
+		$out = array();
+
+		foreach (preg_split('/[\s,;]+/', is_array($raw) ? implode("\n", $raw) : (string)$raw, -1, PREG_SPLIT_NO_EMPTY) as $id) {
+			if (preg_match('/^\d{1,15}$/', $id) && !in_array($id, $out, true)) {
+				$out[] = $id;
+			}
 		}
 
 		return $out;
@@ -667,8 +714,7 @@ class ControllerExtensionModuleAichat extends Controller {
 		foreach (array('s_pos_desktop_side', 's_pos_mobile_side') as $k) {
 			$out[$k] = isset($in[$k]) && $in[$k] === 'left' ? 'left' : 'right';
 		}
-		$css = isset($in['s_custom_css']) ? str_replace(array('<', "\r"), '', $in['s_custom_css']) : '';
-		$out['s_custom_css'] = trim(function_exists('mb_substr') ? mb_substr($css, 0, 5000) : substr($css, 0, 5000));
+		$out['s_custom_css'] = \Aichat\Settings::sanitizeCss(isset($in['s_custom_css']) ? (string)$in['s_custom_css'] : '');
 
 		return $out;
 	}
@@ -736,6 +782,11 @@ class ControllerExtensionModuleAichat extends Controller {
 		$tgToken = isset($post['tg_token']) ? trim($post['tg_token']) : '';
 		if ($tgToken !== '' && !preg_match('/^\d+:[A-Za-z0-9_-]{20,}$/', $tgToken)) {
 			$this->error['tg_token'] = $this->language->get('error_tg_token');
+		}
+		foreach (preg_split('/[\s,;]+/', isset($g['g_tg_staff_ids']) && is_string($g['g_tg_staff_ids']) ? $g['g_tg_staff_ids'] : '', -1, PREG_SPLIT_NO_EMPTY) as $id) {
+			if (!preg_match('/^\d{1,15}$/', $id)) {
+				$this->error['tg_staff_ids'] = $this->language->get('error_tg_staff_ids');
+			}
 		}
 		$codes = array();
 		foreach ($this->cleanCanned(isset($g['g_tg_canned']) ? $g['g_tg_canned'] : array()) as $row) {
@@ -831,9 +882,41 @@ class ControllerExtensionModuleAichat extends Controller {
 
 	public function uninstall() {
 		if ($this->user->hasPermission('modify', 'extension/extension/module')) {
-			\Aichat\Installer::uninstall($this->registry);
+			// events only: the data stays until "Delete all AI Chat data" (purge) is confirmed (audit I6)
+			\Aichat\Installer::uninstall($this->registry, false);
 			$this->db->query("DELETE FROM `" . DB_PREFIX . "event` WHERE `action` = 'extension/module/aichat/menu'");
 		}
+	}
+
+	const PURGE_WORD = 'DELETE';
+
+	/**
+	 * POST confirm=DELETE: deletes every conversation, request, upload, KB
+	 * entry, setting and secret file of the module. OpenCart's Uninstall link
+	 * cannot ask for a typed confirmation, so it keeps the data and this
+	 * separate, typed action deletes it.
+	 */
+	public function purge() {
+		$this->load->language('extension/module/aichat');
+
+		if (!$this->needModify()) {
+			$this->response->redirect($this->url->link('error/permission', 'user_token=' . $this->session->data['user_token'], true));
+			return;
+		}
+
+		$confirm = isset($this->request->post['confirm']) ? trim((string)$this->request->post['confirm']) : '';
+
+		if ($confirm !== self::PURGE_WORD) {
+			$this->session->data['aichat_warning'] = $this->str('error_purge_confirm');
+			$this->response->redirect($this->url->link('extension/module/aichat', 'user_token=' . $this->session->data['user_token'], true));
+			return;
+		}
+
+		\Aichat\Installer::purge($this->registry);
+		// fresh, empty tables and defaults so the module keeps working until it is uninstalled
+		\Aichat\Installer::install($this->registry);
+		$this->session->data['success'] = $this->str('text_purged');
+		$this->response->redirect($this->url->link('extension/module/aichat', 'user_token=' . $this->session->data['user_token'], true));
 	}
 
 	// ------------------------------------------------------------------
@@ -1276,7 +1359,8 @@ class ControllerExtensionModuleAichat extends Controller {
 			'order'    => (int)$c['verified_order_id'],
 			'attempts' => (int)$c['order_attempts'],
 			'ip'       => $c['ip'],
-			'ua'       => $c['user_agent'],
+			// OpenCart's Request escaped $_SERVER before it was stored; the template escapes again (audit I7)
+			'ua'       => html_entity_decode((string)$c['user_agent'], ENT_QUOTES, 'UTF-8'),
 			'first_url' => $this->safeUrl($c['first_url']),
 			'last_url' => $this->safeUrl($c['last_url']),
 			'messages' => (int)$c['message_count'],

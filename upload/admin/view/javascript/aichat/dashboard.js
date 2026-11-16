@@ -96,7 +96,7 @@
 			var h = '';
 			$.each(d.items, function (i, it) {
 				var badge = it.mode === 'human' ? '<span class="label label-warning">' + esc(T.human) + '</span> ' : it.mode === 'waiting' ? '<span class="label label-danger">' + esc(T.waiting) + '</span> ' : '';
-				var page = /^https?:\/\//i.test(it.url) ? '<a href="' + esc(it.url) + '" target="_blank" rel="noopener">' + esc(path(it.url)) + '</a>' : esc(path(it.url));
+				var page = /^https?:\/\//i.test(it.url) ? '<a href="' + esc(it.url) + '" target="_blank" rel="noopener noreferrer">' + esc(path(it.url)) + '</a>' : esc(path(it.url));
 				h += '<tr><td><span class="aichat-dot' + (it.ago < 60 ? ' is-on' : '') + '"></span></td>' +
 					'<td><span class="label label-default">' + esc(it.store) + '</span></td>' +
 					'<td class="aichat-cut">' + badge + page + '</td>' +

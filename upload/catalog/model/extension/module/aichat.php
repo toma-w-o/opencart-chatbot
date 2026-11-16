@@ -114,6 +114,20 @@ class ModelExtensionModuleAichat extends Model {
 		return true;
 	}
 
+	/** E-mail of an order of this store (transcript target after order verification). */
+	public function getOrderEmail($orderId, $storeId) {
+		$query = $this->db->query("SELECT `email` FROM `" . DB_PREFIX . "order` WHERE `order_id` = '" . (int)$orderId . "' AND `store_id` = '" . (int)$storeId . "' AND `order_status_id` > '0'");
+
+		return $query->num_rows ? trim((string)$query->row['email']) : '';
+	}
+
+	/** Upload row with its conversation's store (signed image URLs). */
+	public function getUploadWithStore($uploadId) {
+		$query = $this->db->query("SELECT u.*, c.store_id FROM `" . DB_PREFIX . "aichat_upload` u JOIN `" . DB_PREFIX . "aichat_conversation` c ON (c.conversation_id = u.conversation_id) WHERE u.upload_id = '" . (int)$uploadId . "'");
+
+		return $query->num_rows ? $query->row : null;
+	}
+
 	public function getPreview($previewId) {
 		$query = $this->db->query("SELECT * FROM `" . DB_PREFIX . "aichat_preview` WHERE `preview_id` = '" . (int)$previewId . "' AND `date_added` > NOW() - INTERVAL 1 DAY");
 
