@@ -198,6 +198,7 @@ check('I5: data: images stay allowed', strpos(\Aichat\Settings::sanitizeCss('.a{
 $rm = new ReflectionMethod('\Aichat\Installer', 'uninstall');
 $params = $rm->getParameters();
 check('I6: Installer::uninstall() keeps the data unless asked (default $dropData = false)', isset($params[1]) && $params[1]->getDefaultValue() === false && method_exists('\Aichat\Installer', 'purge'));
+check('A-19: one-character words are ignored, words and query capped', \Aichat\Tools::words('a 6 b ball') === array('ball') && \Aichat\Tools::len(\Aichat\Tools::words(str_repeat('x', 100))[0]) === \Aichat\Tools::MAX_WORD_LEN && count(\Aichat\Tools::words('one two three four five six seven eight')) === \Aichat\Tools::MAX_WORDS, json_encode(\Aichat\Tools::words('a 6 b ball')));
 check('schema 6 / version 1.2.0', \Aichat\Installer::SCHEMA === 6 && \Aichat\Installer::VERSION === '1.2.0');
 
 // ------------------------------------------------------------------ M1 / M2 / L5 over HTTP
@@ -260,6 +261,19 @@ check('M3: that reply is identical to a wrong-phone reply', $generic && $right &
 $t = fresh($s0);
 $other = tool($s0, $t, 'find_order', array('order_id' => '9001', 'phone' => '0888123456'));
 check('M3: other order numbers are not affected', !empty($other['found']), json_encode($other));
+$KEEP = array();
+q("DELETE FROM oc_aichat_rate");
+
+// store under attack (guard.php orderGate): 2 checks per IP and hour for chats without Turnstile, reply unchanged
+$KEEP = array('of:s:0', 'o:x:127.0.0.1');
+q("INSERT INTO oc_aichat_rate SET rate_key = '" . rateHash('of:s:0') . "', window_start = " . (int)(floor(time() / 3600) * 3600) . ", hits = 50");
+$gate = array();
+for ($i = 0; $i < 3; $i++) {
+	$t = fresh($s0);
+	$gate[] = tool($s0, $t, 'find_order', array('order_id' => '9001', 'phone' => '0888123456'));
+}
+check('M3: under attack, the third check of this IP within the hour is refused even with the right phone', !empty($gate[0]['found']) && !empty($gate[1]['found']) && empty($gate[2]['found']), json_encode($gate[2]));
+check('M3: the refusal is the ordinary generic failure', isset($gate[2]['message'], $generic['message']) && $gate[2]['message'] === $generic['message'] && array_keys($gate[2]) === array_keys($generic) && empty($gate[2]['locked']), json_encode($gate[2]));
 $KEEP = array();
 q("DELETE FROM oc_aichat_rate");
 

@@ -12,6 +12,11 @@ class Tools {
 	const MAX_SEARCH = 10;
 	const MAX_CARDS = 6;
 	const MAX_WORDS = 6;
+	/** longest search word / query that is used (characters) */
+	const MAX_WORD_LEN = 40;
+	const MAX_QUERY_LEN = 200;
+	/** time limit of one catalog text search (seconds), where the database supports it */
+	const SEARCH_SECONDS = 2;
 
 	private $registry;
 	private $db;
@@ -596,15 +601,17 @@ class Tools {
 
 	/** Splits a query into lowercase search words (max 6), longest first. */
 	public static function words($query) {
-		$query = function_exists('mb_strtolower') ? mb_strtolower((string)$query, 'UTF-8') : strtolower((string)$query);
+		$query = self::sub((string)$query, 0, self::MAX_QUERY_LEN);
+		$query = function_exists('mb_strtolower') ? mb_strtolower($query, 'UTF-8') : strtolower($query);
 		$parts = preg_split('/[\s,;"\'()\[\]{}!?+*|]+/u', $query, -1, PREG_SPLIT_NO_EMPTY);
 		$words = array();
 
 		foreach ($parts as $part) {
 			$part = trim($part, '.-_/:#');
 			$len = self::len($part);
-			if ($len >= 2 || ($len === 1 && ctype_digit($part))) {
-				$words[$part] = true;
+			// words of one character match almost everything: ignored (audit A-19)
+			if ($len >= 2) {
+				$words[$len > self::MAX_WORD_LEN ? self::sub($part, 0, self::MAX_WORD_LEN) : $part] = true;
 			}
 		}
 
@@ -679,7 +686,47 @@ class Tools {
 
 		$sql .= " ORDER BY score DESC, (p.quantity > 0) DESC, p.sort_order ASC, pd.name ASC LIMIT " . (int)$limit;
 
-		return $this->db->query($sql)->rows;
+		return $this->bounded($sql);
+	}
+
+	private static $timeLimitSyntax = null;
+
+	/**
+	 * A text search (LIKE '%..%' scans) with a statement time limit where the
+	 * server has one: MariaDB >= 10.1.2 "SET STATEMENT max_statement_time",
+	 * MySQL >= 5.7.8 the MAX_EXECUTION_TIME hint. A search that runs out of
+	 * time returns no rows instead of holding the database (audit A-19).
+	 */
+	private function bounded($sql) {
+		if (self::$timeLimitSyntax === null) {
+			self::$timeLimitSyntax = '';
+			try {
+				$version = (string)$this->db->query("SELECT VERSION() AS v")->row['v'];
+				if (stripos($version, 'mariadb') !== false) {
+					self::$timeLimitSyntax = version_compare(preg_replace('/^(\d+\.\d+\.\d+).*/', '$1', $version), '10.1.2', '>=') ? 'mariadb' : '';
+				} elseif (preg_match('/^(\d+\.\d+\.\d+)/', $version, $m) && version_compare($m[1], '5.7.8', '>=')) {
+					self::$timeLimitSyntax = 'mysql';
+				}
+			} catch (\Exception $e) {
+				self::$timeLimitSyntax = '';
+			}
+		}
+
+		if (self::$timeLimitSyntax === 'mariadb') {
+			$sql = "SET STATEMENT max_statement_time = " . (int)self::SEARCH_SECONDS . " FOR " . $sql;
+		} elseif (self::$timeLimitSyntax === 'mysql') {
+			$sql = preg_replace('/^\s*SELECT\b/i', 'SELECT /*+ MAX_EXECUTION_TIME(' . ((int)self::SEARCH_SECONDS * 1000) . ') */', $sql, 1);
+		}
+
+		try {
+			return $this->db->query($sql)->rows;
+		} catch (\Exception $e) {
+			$log = $this->registry->get('log');
+			if ($log) {
+				$log->write('AI Chat: catalog search stopped (' . substr($e->getMessage(), 0, 200) . ')');
+			}
+			return array();
+		}
 	}
 
 	private function productSelect() {
@@ -1305,7 +1352,7 @@ class Tools {
 				$conds[] = "(id.title LIKE " . $like . " OR id.description LIKE " . $like . ")";
 				$score[] = "(id.title LIKE " . $like . ") * 3 + (id.description LIKE " . $like . ")";
 			}
-			$rows = $this->db->query(str_replace('SELECT i.information_id,', 'SELECT (' . implode(' + ', $score) . ') AS score, i.information_id,', $base) . " AND (" . implode(' OR ', $conds) . ") ORDER BY score DESC, i.sort_order LIMIT 5")->rows;
+			$rows = $this->bounded(str_replace('SELECT i.information_id,', 'SELECT (' . implode(' + ', $score) . ') AS score, i.information_id,', $base) . " AND (" . implode(' OR ', $conds) . ") ORDER BY score DESC, i.sort_order LIMIT 5");
 		}
 
 		if (!$rows) {
@@ -1409,7 +1456,7 @@ class Tools {
 
 		return array(
 			'similar_to' => (int)$productId,
-			'products'   => $this->present($this->db->query($sql)->rows, false),
+			'products'   => $this->present($this->bounded($sql), false),
 			'note'       => 'Closest alternatives by category and price. Recommend only those that really fit what the customer wanted.',
 		);
 	}
@@ -1454,7 +1501,7 @@ class Tools {
 				$conds[] = "(`question` LIKE " . $like . " OR `answer` LIKE " . $like . ")";
 				$score[] = "(`question` LIKE " . $like . ") * 2 + (`answer` LIKE " . $like . ")";
 			}
-			$rows = $this->db->query("SELECT `kb_id`, `question`, `answer`, (" . implode(' + ', $score) . ") AS score FROM `" . DB_PREFIX . "aichat_kb`" . $this->kbWhere() . " AND (" . implode(' OR ', $conds) . ") ORDER BY score DESC, `date_added` DESC LIMIT 5")->rows;
+			$rows = $this->bounded("SELECT `kb_id`, `question`, `answer`, (" . implode(' + ', $score) . ") AS score FROM `" . DB_PREFIX . "aichat_kb`" . $this->kbWhere() . " AND (" . implode(' OR ', $conds) . ") ORDER BY score DESC, `date_added` DESC LIMIT 5");
 			foreach ($rows as $row) {
 				$out[] = array('question' => $this->text($row['question']), 'answer' => $this->plain($row['answer'], 2000));
 			}
