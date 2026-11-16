@@ -7,9 +7,9 @@ namespace Aichat;
  */
 class Installer {
 	const EVENT_CODE = 'aichat';
-	const VERSION = '1.2.0';
+	const VERSION = '1.1.0';
 	/** Bump when a step is added to migrate(). */
-	const SCHEMA = 3;
+	const SCHEMA = 4;
 
 	/** Event list: trigger => action (all under code EVENT_CODE). */
 	public static function events() {
@@ -25,6 +25,7 @@ class Installer {
 		self::migrate($db, 0);
 
 		$settings = new Settings($registry);
+		$fromSchema = (int)$settings->getGlobal('g_schema');
 		$settings->ensureSecret();
 		$settings->telegramSecret();
 
@@ -37,6 +38,11 @@ class Installer {
 		}
 		if ($missing) {
 			$settings->saveGlobal($missing);
+		}
+
+		if ($fromSchema < 4) {
+			// once per install: an owner who later deletes the NextLevel row keeps it deleted
+			self::migrateCouriers($settings);
 		}
 
 		self::registerEvents($registry);
@@ -76,6 +82,51 @@ class Installer {
 		self::addColumn($db, 'aichat_conversation', 'is_test', "TINYINT(1) NOT NULL DEFAULT '0' AFTER `waiting_since`");
 		self::addIndex($db, 'aichat_conversation', 'tg_topic', '`tg_chat_id`, `tg_topic_id`');
 		self::addColumn($db, 'aichat_message', 'rating', "TINYINT(1) NOT NULL DEFAULT '0' AFTER `cost`");
+
+		// 4: e-mail outcome of a request
+		self::addColumn($db, 'aichat_request', 'mailed', "TINYINT(1) NULL DEFAULT NULL AFTER `status`");
+	}
+
+	/**
+	 * 4: courier rows gain `pattern` and `aliases`. Speedy rows without a
+	 * pattern key get the seed pattern (an existing key, even empty, is the
+	 * owner's choice and kept); a NextLevel row is added when no row has the
+	 * code nextlevel or the host nextlevel.delivery.
+	 */
+	private static function migrateCouriers(Settings $settings) {
+		$list = $settings->getGlobal('g_couriers');
+		$list = is_array($list) ? array_values($list) : array();
+		$changed = false;
+		$hasNextLevel = false;
+		$speedy = Settings::speedySeed();
+
+		foreach ($list as $i => $c) {
+			if (!is_array($c)) {
+				continue;
+			}
+			$code = isset($c['code']) ? strtolower((string)$c['code']) : '';
+			$hosts = isset($c['hosts']) ? (is_array($c['hosts']) ? implode(' ', $c['hosts']) : (string)$c['hosts']) : '';
+			if ($code === 'nextlevel' || stripos($hosts, 'nextlevel.delivery') !== false) {
+				$hasNextLevel = true;
+			}
+			if (!array_key_exists('pattern', $c) && ((isset($c['type']) && $c['type'] === 'speedy') || $code === 'speedy' || stripos($hosts, 'speedy.bg') !== false)) {
+				$list[$i]['pattern'] = $speedy['pattern'];
+				$changed = true;
+			}
+			if (!array_key_exists('aliases', $c) && ($code === 'speedy' || stripos($hosts, 'speedy.bg') !== false)) {
+				$list[$i]['aliases'] = $speedy['aliases'];
+				$changed = true;
+			}
+		}
+
+		if (!$hasNextLevel) {
+			$list[] = Settings::nextLevelSeed();
+			$changed = true;
+		}
+
+		if ($changed) {
+			$settings->saveGlobal(array('g_couriers' => $list));
+		}
 	}
 
 	/** Tables of the module (uninstall drops them). */
@@ -278,6 +329,7 @@ class Installer {
 			`phone` VARCHAR(32) NOT NULL DEFAULT '',
 			`data` MEDIUMTEXT NULL,
 			`status` VARCHAR(8) NOT NULL DEFAULT 'new',
+			`mailed` TINYINT(1) NULL DEFAULT NULL,
 			`date_added` DATETIME NOT NULL,
 			PRIMARY KEY (`request_id`),
 			KEY `store_status` (`store_id`, `status`, `date_added`),

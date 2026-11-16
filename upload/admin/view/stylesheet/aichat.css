@@ -226,3 +226,4 @@ textarea.aichat-mono { font-family: Menlo, Consolas, monospace; font-size: 12px;
 @keyframes aichat-blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
 @media (max-width: 1100px) { .aichat-tc-log { height: 360px; } }
 #aichat-live { max-height: 330px; overflow-y: auto; }
+.aichat-courier-adv summary{cursor:pointer;color:#1e91cf;margin:4px 0 8px;font-size:12px}

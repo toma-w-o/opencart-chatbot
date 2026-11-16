@@ -68,17 +68,58 @@ class Settings {
 		return array('g_secret', 'g_schema', 'g_warn_sent', 'g_tg_secret', 'g_report_week', 'g_cleanup_day');
 	}
 
-	/** Courier list seeded at install: {code, name, type: speedy|link, hosts[], track_url with {number}}. */
+	/**
+	 * Courier list seeded at install: {code, name, type: speedy|link, hosts[],
+	 * track_url with {number}, pattern (regex for a bare tracking number),
+	 * aliases[] (other names staff write in comments / status names)}.
+	 */
 	public static function defaultCouriers() {
 		return array(
-			array(
-				'code'      => 'speedy',
-				'name'      => 'Speedy',
-				'type'      => 'speedy',
-				'hosts'     => array('speedy.bg'),
-				'track_url' => 'https://www.speedy.bg/bg/track-shipment?shipmentNumber={number}',
-			),
+			self::speedySeed(),
+			self::nextLevelSeed(),
 		);
+	}
+
+	public static function speedySeed() {
+		return array(
+			'code'      => 'speedy',
+			'name'      => 'Speedy',
+			'type'      => 'speedy',
+			'hosts'     => array('speedy.bg'),
+			'track_url' => 'https://www.speedy.bg/bg/track-shipment?shipmentNumber={number}',
+			'pattern'   => '^6\\d{10}$',
+			'aliases'   => array('Спиди', 'Speedy'),
+		);
+	}
+
+	public static function nextLevelSeed() {
+		return array(
+			'code'      => 'nextlevel',
+			'name'      => 'NextLevel',
+			'type'      => 'link',
+			'hosts'     => array('nextlevel.delivery'),
+			'track_url' => 'https://nextlevel.delivery/bg/track?awb={number}',
+			'pattern'   => '^1000\\d{9}$',
+			'aliases'   => array('Next Level', 'НекстЛевъл', 'Некст Левъл'),
+		);
+	}
+
+	/**
+	 * A courier number pattern as a complete PCRE (anchored on the whole
+	 * number), or '' when empty / not a valid regular expression.
+	 */
+	public static function patternRegex($pattern) {
+		$pattern = trim((string)$pattern);
+
+		if ($pattern === '' || strlen($pattern) > 200) {
+			return '';
+		}
+
+		$core = preg_replace('/^\^/', '', $pattern);
+		$core = preg_replace('/(?<!\\\\)\$$/', '', $core);
+		$regex = '~^(?:' . str_replace('~', '\\~', $core) . ')$~i';
+
+		return @preg_match($regex, '') === false ? '' : $regex;
 	}
 
 	/** Per-store defaults, keyed by spec name. */
@@ -138,6 +179,11 @@ class Settings {
 			's_feat_images'           => 1,
 			's_feat_rating'           => 1,
 			's_feat_cart'             => 1,
+			// round 4
+			's_store_name'            => '', // optional; empty = config_name -> store name -> host
+			's_notify_email'          => '', // optional; empty = the store's config_email
+			's_attention'             => 1,  // launcher avatar plays a short grimace while the panel is closed
+			's_attention_interval'    => 5,  // seconds between grimaces
 		);
 	}
 
@@ -328,12 +374,27 @@ class Settings {
 				}
 			}
 			$type = isset($c['type']) && $c['type'] === 'speedy' ? 'speedy' : 'link';
+			$aliases = isset($c['aliases']) ? $c['aliases'] : array();
+			if (is_string($aliases)) {
+				$aliases = preg_split('/\s*[,;\n]\s*/u', $aliases, -1, PREG_SPLIT_NO_EMPTY);
+			}
+			$cleanAliases = array();
+			foreach (is_array($aliases) ? $aliases : array() as $a) {
+				$a = trim(html_entity_decode((string)$a, ENT_QUOTES, 'UTF-8'));
+				if ($a !== '' && !in_array($a, $cleanAliases, true)) {
+					$cleanAliases[] = $a;
+				}
+			}
+			$pattern = isset($c['pattern']) ? html_entity_decode(trim((string)$c['pattern']), ENT_QUOTES, 'UTF-8') : '';
 			$out[$code] = array(
 				'code'      => $code,
 				'name'      => isset($c['name']) && trim((string)$c['name']) !== '' ? html_entity_decode(trim((string)$c['name']), ENT_QUOTES, 'UTF-8') : $code,
 				'type'      => $type,
 				'hosts'     => $clean,
 				'track_url' => isset($c['track_url']) ? html_entity_decode(trim((string)$c['track_url']), ENT_QUOTES, 'UTF-8') : '',
+				'pattern'   => $pattern,
+				'regex'     => self::patternRegex($pattern),
+				'aliases'   => $cleanAliases,
 			);
 		}
 

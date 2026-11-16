@@ -185,8 +185,8 @@ class Tools {
 							'items'       => array(
 								'type'       => 'object',
 								'properties' => array(
-									'type' => array('type' => 'string', 'enum' => array('category', 'manufacturer', 'information', 'special', 'contact')),
-									'id'   => array('type' => 'integer', 'description' => 'category_id / manufacturer_id / information_id; not used for special and contact.'),
+									'type' => array('type' => 'string', 'enum' => array('category', 'manufacturer', 'information', 'special', 'contact', 'return')),
+									'id'   => array('type' => 'integer', 'description' => 'category_id / manufacturer_id / information_id; order_id for return (optional); not used for special and contact.'),
 								),
 								'required'             => array('type'),
 								'additionalProperties' => false,
@@ -292,6 +292,20 @@ class Tools {
 						'image_ids' => array('type' => 'array', 'items' => array('type' => 'integer'), 'description' => 'Ids of photos the customer attached in this chat (shown as [Attached images: #id]).'),
 					),
 					'required'             => array('order_id', 'product', 'reason', 'details'),
+					'additionalProperties' => false,
+				),
+			),
+			array(
+				'name'        => 'order_change_request',
+				'description' => 'Pass a customer\'s request to cancel or change an existing order (items, quantities, delivery address, other) to the team. Only for an order verified in this chat (find_order) or the logged-in customer\'s own order (my_order). You never change the order yourself: this records the request and e-mails it to a colleague, who confirms or declines it with the customer. Collect what exactly should change in the customer\'s words first. The result tells you whether it was registered or, for a delivered order, that the returns form applies instead.',
+				'input_schema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'order_id' => array('type' => 'string', 'description' => 'Order number.'),
+						'kind'     => array('type' => 'string', 'enum' => array('cancel', 'items', 'address', 'other'), 'description' => 'cancel the order, change items / quantities, change the delivery address, or something else.'),
+						'details'  => array('type' => 'string', 'description' => 'What the customer wants, in their own words (short): e.g. new address, which product to add or remove, reason for cancelling.'),
+					),
+					'required'             => array('order_id', 'kind', 'details'),
 					'additionalProperties' => false,
 				),
 			),
@@ -405,6 +419,10 @@ class Tools {
 
 				case 'leave_contact':
 					return $this->ok($this->leaveContact($input));
+
+				case 'order_change_request':
+					$result = $this->orderChangeRequest($input);
+					return $this->ok($result);
 
 				case 'list_categories':
 					$parent = isset($input['parent_id']) && is_numeric($input['parent_id']) ? (int)$input['parent_id'] : 0;
@@ -1197,6 +1215,10 @@ class Tools {
 			case 'special':
 				return array('type' => 'special', 'title' => $this->lang('card_special', 'Special offers'), 'href' => $this->href('product/special', ''));
 
+			case 'return':
+				// OpenCart's returns form; order_id pre-fills it for the logged-in owner of the order
+				return array('type' => 'return', 'title' => $this->lang('card_return', 'Returns form'), 'subtitle' => $id ? sprintf($this->lang('card_return_order', 'Order #%s'), (int)$id) : '', 'href' => $this->href('account/return/add', $id ? 'order_id=' . (int)$id : ''));
+
 			case 'contact':
 				$card = array('type' => 'contact', 'title' => $this->lang('card_contact', 'Contact us'), 'href' => $this->href('information/contact', ''));
 				$parts = array();
@@ -1500,7 +1522,7 @@ class Tools {
 			. "Product: " . $this->text($row['name']) . " (#" . (int)$row['product_id'] . ", " . $this->text($row['model']) . ")\n"
 			. "E-mail: " . $email . "\n"
 			. "Chat: #" . (int)$this->conversation['conversation_id'] . "\n\n"
-			. "Клиент иска известие, когато продуктът е наличен.\n", $email);
+			. "Клиент иска известие, когато продуктът е наличен.\n", $email, array(), $id);
 
 		return array('ok' => true, 'request_id' => $id, 'message' => 'Registered: the store will e-mail the customer when the product is back in stock. Do not promise a date.');
 	}
@@ -1584,7 +1606,7 @@ class Tools {
 			. "Reason: " . $reason . "\n"
 			. "Details: " . $details . "\n"
 			. "Photos: " . count($files) . " attached\n"
-			. "Chat: #" . (int)$this->conversation['conversation_id'] . "\n", (string)$order['email'], $files);
+			. "Chat: #" . (int)$this->conversation['conversation_id'] . "\n", (string)$order['email'], $files, $id);
 
 		return array('ok' => true, 'request_id' => $id, 'message' => 'The return request was registered and sent to the team; they will contact the customer by e-mail or phone. Do not promise refunds, deadlines or the outcome.');
 	}
@@ -1615,9 +1637,89 @@ class Tools {
 			. "Phone: " . ($phone !== '' ? $phone : '-') . "\n"
 			. "Note: " . ($note !== '' ? $note : '-') . "\n"
 			. "Page: " . $this->conversation['last_url'] . "\n\n"
-			. "--- Conversation #" . $cid . " ---\n" . Handover::transcript($this->db, $cid, 200) . "\n", $email);
+			. "--- Conversation #" . $cid . " ---\n" . Handover::transcript($this->db, $cid, 200) . "\n", $email, array(), $id);
 
 		return array('ok' => true, 'request_id' => $id, 'message' => 'The contact and the conversation were sent to the team; they will get back to the customer. Confirm this briefly; do not promise a time.');
+	}
+
+	/**
+	 * order_change_request: verified / own order only (one generic reply
+	 * otherwise). Delivered -> no request, the returns form link card.
+	 * Shipped or open -> aichat_request type "order" + e-mail to the store
+	 * stating how the customer was verified. The order itself is never touched.
+	 */
+	public function orderChangeRequest(array $input) {
+		$gate = $this->requestGate();
+
+		if ($gate) {
+			return $gate;
+		}
+
+		$generic = array('ok' => false, 'message' => 'Order changes can be requested only for an order verified in this chat: ask for the order number and the phone number of the order and call find_order first (logged-in customers: my_orders). Say nothing about whether such an order exists.');
+
+		if (!$this->orders) {
+			return $generic;
+		}
+
+		$order = $this->orders->visibleOrder(isset($input['order_id']) && is_scalar($input['order_id']) ? (string)$input['order_id'] : '');
+
+		if (!$order) {
+			return $generic;
+		}
+
+		$kinds = array('cancel', 'items', 'address', 'other');
+		$kind = isset($input['kind']) && in_array($input['kind'], $kinds, true) ? $input['kind'] : 'other';
+		$details = isset($input['details']) && is_string($input['details']) ? $this->cut(trim($input['details']), 2000) : '';
+
+		if ($details === '' && $kind !== 'cancel') {
+			return array('ok' => false, 'message' => 'Ask the customer what exactly should change first, then call again with details.');
+		}
+
+		$stage = $this->orders->stage($order);
+
+		if ($stage['stage'] === 'delivered') {
+			$card = $this->linkCard('return', (int)$order['order_id']);
+			if ($card) {
+				$this->addLinkCard($card);
+			}
+			return array('ok' => false, 'stage' => 'delivered', 'message' => 'This order has already been delivered, so it can no longer be cancelled or changed. Explain this kindly; for returning or exchanging products the customer can use the returns form (a link card is shown under your reply), or tell you about the problem so you can register a return request with return_request.');
+		}
+
+		$verifiedBy = $this->orders->verifiedBy($order);
+		$verifiedText = $verifiedBy === 'logged_in'
+			? "Verified: logged-in customer (account of the order) / Потвърдено: логнат клиент (профилът на поръчката)"
+			: "Verified: the order number and the phone number match / Потвърдено: номерът на поръчката и телефонът съвпадат";
+		$kindText = array('cancel' => 'Cancel the order / Отказ от поръчката', 'items' => 'Change products / Промяна на продукти', 'address' => 'Change delivery address / Промяна на адреса', 'other' => 'Other change / Друга промяна');
+		$stageText = $stage['stage'] === 'shipped' ? 'already shipped / вече е изпратена – please check with the courier' : 'not shipped yet / още не е изпратена';
+		$cid = (int)$this->conversation['conversation_id'];
+
+		$requests = $this->requests();
+		$id = $requests->add(array(
+			'store_id'        => $this->storeId,
+			'conversation_id' => $cid,
+			'type'            => 'order',
+			'order_id'        => (int)$order['order_id'],
+			'email'           => (string)$order['email'],
+			'phone'           => (string)$order['telephone'],
+			'data'            => array('kind' => $kind, 'details' => $details, 'stage' => $stage['stage'], 'status' => $stage['status'], 'verified' => $verifiedBy),
+		));
+
+		$requests->mailStore($this->storeId, $this->testPrefix() . 'AI Chat: order change request #' . $id . ' – order #' . (int)$order['order_id'] . ' (' . $kind . ')',
+			"A customer asked in the chat to change an order. Nothing has been changed yet: please confirm or decline it with the customer.\n"
+			. "Клиент поиска в чата промяна на поръчка. Нищо не е променено: моля, потвърдете или откажете на клиента.\n\n"
+			. $verifiedText . "\n"
+			. "Request: " . $kindText[$kind] . "\n"
+			. "Order status: " . $stage['status'] . " (" . $stageText . ")\n"
+			. "Customer's words / Думите на клиента:\n" . ($details !== '' ? $details : '-') . "\n\n"
+			. $this->orders->summaryText($order) . "\n\n"
+			. "--- Conversation #" . $cid . " ---\n" . Handover::transcript($this->db, $cid, 60) . "\n", (string)$order['email'], array(), $id);
+
+		return array(
+			'ok'         => true,
+			'request_id' => $id,
+			'stage'      => $stage['stage'],
+			'message'    => 'The request was registered and sent to a colleague. Tell the customer warmly that you passed it on and a colleague will confirm it (by e-mail or phone). Do not say the order was changed or cancelled, and do not promise that it will be.' . ($stage['stage'] === 'shipped' ? ' The order has already been shipped, so say honestly that a change may no longer be possible; the colleague will check.' : ''),
+		);
 	}
 
 	private function testPrefix() {

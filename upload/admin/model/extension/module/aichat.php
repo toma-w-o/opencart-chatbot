@@ -365,7 +365,7 @@ class ModelExtensionModuleAichat extends Model {
 	private function requestWhere($f) {
 		$w = array('1');
 
-		if (!empty($f['type']) && in_array($f['type'], array('contact', 'stock', 'return'), true)) {
+		if (!empty($f['type']) && in_array($f['type'], array('contact', 'stock', 'return', 'order'), true)) {
 			$w[] = "r.`type` = '" . $this->db->escape($f['type']) . "'";
 		}
 		if (!empty($f['status']) && in_array($f['status'], array('new', 'done'), true)) {
@@ -373,6 +373,9 @@ class ModelExtensionModuleAichat extends Model {
 		}
 		if (isset($f['store_id']) && $f['store_id'] !== '') {
 			$w[] = "r.`store_id` = '" . (int)$f['store_id'] . "'";
+		}
+		if (!empty($f['mail_failed']) && $this->hasColumn('request', 'mailed')) {
+			$w[] = "r.`mailed` = '0'";
 		}
 
 		return implode(' AND ', $w);

@@ -16,6 +16,8 @@ P0=${P0:-8080}
 P1=${P1:-8081}
 PAPI=${PAPI:-8099}
 PSVC=${PSVC:-8098}
+PSMTP0=${PSMTP0:-2525}
+PSMTP1=${PSMTP1:-2526}
 export COMPOSER_ALLOW_SUPERUSER=1
 
 # 1. MariaDB
@@ -51,7 +53,8 @@ define('AICHAT_API_BASE', 'http://127.0.0.1:$PAPI');
 define('AICHAT_TURNSTILE_URL', 'http://127.0.0.1:$PSVC/siteverify');
 define('AICHAT_SPEEDY_BASE', 'http://127.0.0.1:$PSVC/v1');
 define('AICHAT_TELEGRAM_BASE', 'http://127.0.0.1:$PSVC/tg');
-define('AICHAT_MAIL_FILE', '$WORK/mail.log');
+// mails go to a file unless the flag file exists: then through OpenCart's real Mail class (fake SMTP on $PSMTP0 / $PSMTP1)
+if (!is_file('$WORK/mail_real.flag')) define('AICHAT_MAIL_FILE', '$WORK/mail.log');
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
 EOF
 pkill -f "php -d auto_prepend_file=$WORK/tools/prepend_test.php" || true
@@ -59,11 +62,14 @@ pkill -f "127.0.0.1:$P0" || true
 pkill -f "127.0.0.1:$P1" || true
 pkill -f "127.0.0.1:$PAPI" || true
 pkill -f "127.0.0.1:$PSVC" || true
-rm -f "$WORK/mail.log" "$WORK/fake_tg.json"
+pkill -f "tests/fake_smtp.php" || true
+rm -f "$WORK/mail.log" "$WORK/fake_tg.json" "$WORK/smtp.log" "$WORK/mail_real.flag"
 sleep 0.5
 (php -d auto_prepend_file="$WORK/tools/prepend_test.php" -S 127.0.0.1:$P0 -t "$OC" >"$WORK/srv$P0.log" 2>&1 &)
 (php -d auto_prepend_file="$WORK/tools/prepend_test.php" -S 127.0.0.1:$P1 -t "$OC" >"$WORK/srv$P1.log" 2>&1 &)
 (FAKE_LOG="$WORK/fake.log" FAKE_OWN="http://127.0.0.1:$P0/" php -S 127.0.0.1:$PAPI "$REPO/tests/fake_anthropic.php" >"$WORK/fake_srv.log" 2>&1 &)
+(php "$REPO/tests/fake_smtp.php" $PSMTP0 "$WORK/smtp.log" >"$WORK/fake_smtp0.log" 2>&1 &)
+(php "$REPO/tests/fake_smtp.php" $PSMTP1 "$WORK/smtp.log" >"$WORK/fake_smtp1.log" 2>&1 &)
 (FAKE_SVC_LOG="$WORK/fake_services.log" FAKE_TG_STATE="$WORK/fake_tg.json" php -S 127.0.0.1:$PSVC "$REPO/tests/fake_services.php" >"$WORK/fake_svc_srv.log" 2>&1 &)
 sleep 1
 
@@ -92,5 +98,8 @@ curl -s -b "$CJ" -o /dev/null "$A?route=extension/extension/module/install&exten
 # 7. Smoke test
 RC=0
 php "$REPO/tests/installer_test.php" "$OC" localhost oc oc "$DB" oc_ || RC=1
-SMOKE_DB=localhost:oc:oc:$DB:oc_ SMOKE_OC="$OC" SMOKE_MAIL="$WORK/mail.log" SMOKE_TG="http://127.0.0.1:$PSVC/tg" php "$REPO/tests/smoke_http.php" "http://127.0.0.1:$P0/" "http://127.0.0.1:$P1/" || RC=1
+php "$REPO/tests/tracking_test.php" "$OC" || RC=1
+SMOKE_DB=localhost:oc:oc:$DB:oc_ SMOKE_OC="$OC" SMOKE_MAIL="$WORK/mail.log" SMOKE_TG="http://127.0.0.1:$PSVC/tg" SMOKE_WORK="$WORK" SMOKE_SMTP="$PSMTP0:$PSMTP1" php "$REPO/tests/smoke_http.php" "http://127.0.0.1:$P0/" "http://127.0.0.1:$P1/" || RC=1
+php "$REPO/tests/mail_smtp_test.php" "$OC" localhost oc oc "$DB" oc_ "$WORK/smtp.log" $PSMTP0 || RC=1
+(cd "$WORK" && node "$REPO/tests/admin_round4.js" "$WORK") || RC=1
 exit $RC

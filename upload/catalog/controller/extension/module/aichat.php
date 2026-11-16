@@ -113,11 +113,12 @@ class ControllerExtensionModuleAichat extends Controller {
 		}
 
 		$turnstile = $guard->turnstileEnabled() ? trim((string)$settings->getGlobal('g_turnstile_site')) : '';
+		$wait = $conversation ? (new \Aichat\Handover($this->registry, $settings))->waitInfo($conversation) : array();
 
-		$this->json(array(
+		$this->json($wait + array(
 			'enabled'        => true,
 			'bot_name'       => $botName,
-			'avatar'         => $store['s_avatar'] !== '' ? $store['s_avatar'] : 'default',
+			'avatar'         => $this->avatarId($store['s_avatar']),
 			'greeting'       => $greeting,
 			'emoji'          => (int)$store['s_emoji'],
 			'strings'        => $this->strings($botName),
@@ -285,7 +286,35 @@ class ControllerExtensionModuleAichat extends Controller {
 			),
 			'z_index'     => $int($store['s_zindex'], 1, 2147483647, 2147483000),
 			'custom_css'  => $css,
+			'attention'   => array(
+				'enabled'  => (int)$store['s_attention'] === 1,
+				'interval' => $int($store['s_attention_interval'], 2, 600, 5),
+			),
 		);
+	}
+
+	/** Saved avatar id, or "default" when it is not in the installed avatar set (avatars/manifest.json). */
+	private function avatarId($id) {
+		$id = (string)$id;
+
+		if ($id === '' || !preg_match('/^[A-Za-z0-9_-]+$/', $id)) {
+			return 'default';
+		}
+
+		$file = DIR_APPLICATION . 'view/javascript/aichat/avatars/manifest.json';
+		$list = is_file($file) ? json_decode((string)file_get_contents($file), true) : null;
+
+		if (!is_array($list)) {
+			return $id; // no manifest: the widget falls back itself
+		}
+
+		foreach ($list as $item) {
+			if (is_array($item) && isset($item['id']) && (string)$item['id'] === $id) {
+				return $id;
+			}
+		}
+
+		return 'default';
 	}
 
 	// ================================================================ send
@@ -502,7 +531,7 @@ class ControllerExtensionModuleAichat extends Controller {
 
 		if ($mode !== 'bot') {
 			$handover->forwardVisitor($conversation, $message, $imageRows);
-			$this->finish(array('reply' => '', 'products' => array(), 'product_groups' => array(), 'cards' => array(), 'mode' => $mode, 'message_id' => $userMessageId));
+			$this->finish($handover->waitInfo($conversation) + array('reply' => '', 'products' => array(), 'product_groups' => array(), 'cards' => array(), 'mode' => $mode, 'message_id' => $userMessageId));
 			return;
 		}
 
@@ -646,7 +675,7 @@ class ControllerExtensionModuleAichat extends Controller {
 		$after = $model->getConversation($publicId, $storeId);
 		$mode = $after && in_array($after['mode'], array('waiting', 'human'), true) ? $after['mode'] : 'bot';
 
-		$this->finish(array(
+		$this->finish($handover->waitInfo($after) + array(
 			'reply'          => $reply,
 			'products'       => $this->flatten($groups),
 			'product_groups' => $groups,
@@ -1079,8 +1108,8 @@ class ControllerExtensionModuleAichat extends Controller {
 			return;
 		}
 
-		$info = \Aichat\Mailer::storeConfig($this->registry, $ctx['store_id']);
-		$from = \Aichat\Mailer::storeEmail($this->registry, $ctx['settings'], $ctx['store_id']);
+		$info = \Aichat\Mailer::storeConfig($this->registry, $ctx['store_id'], $ctx['settings']);
+		$from = $info['email'];
 		$botName = $this->botName($ctx['store']);
 		$text = sprintf($this->language->get('transcript_intro'), $info['name']) . "\n\n"
 			. \Aichat\Handover::transcript($this->db, (int)$ctx['conversation']['conversation_id'], 500, array(
@@ -1090,7 +1119,7 @@ class ControllerExtensionModuleAichat extends Controller {
 				'system'    => '—',
 			)) . "\n\n" . rtrim((string)$info['url'], '/') . "/\n";
 
-		$ok = \Aichat\Mailer::send($this->registry, $email, sprintf($this->language->get('transcript_subject'), $info['name']), $text, array('from' => $from, 'sender' => $info['name']));
+		$ok = \Aichat\Mailer::send($this->registry, $email, sprintf($this->language->get('transcript_subject'), $info['name']), $text, array('from' => $from, 'sender' => $info['name'], 'store_id' => $ctx['store_id'], 'settings' => $ctx['settings']));
 
 		if (!$ok) {
 			$this->fail('api_error');
@@ -1169,7 +1198,7 @@ class ControllerExtensionModuleAichat extends Controller {
 
 		$mode = $conversation['mode'] === 'closed' ? 'bot' : $conversation['mode'];
 
-		$this->json(array('mode' => $mode, 'messages' => $messages));
+		$this->json($handover->waitInfo($conversation) + array('mode' => $mode, 'messages' => $messages));
 	}
 
 	/**
@@ -1527,7 +1556,13 @@ class ControllerExtensionModuleAichat extends Controller {
 
 	private function finish(array $data) {
 		if ($this->streaming) {
-			$this->sse('done', array('message_id' => $data['message_id'], 'mode' => $data['mode']));
+			$done = array('message_id' => $data['message_id'], 'mode' => $data['mode']);
+			foreach (array('wait_until', 'wait_seconds', 'wait_text') as $k) {
+				if (isset($data[$k])) {
+					$done[$k] = $data[$k];
+				}
+			}
+			$this->sse('done', $done);
 			return;
 		}
 

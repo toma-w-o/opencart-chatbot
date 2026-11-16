@@ -247,6 +247,10 @@ class ControllerExtensionModuleAichat extends Controller {
 			's_feat_images'          => 1,
 			's_feat_rating'          => 1,
 			's_feat_cart'            => 1,
+			's_attention'            => 1,
+			's_attention_interval'   => 5,
+			's_store_name'           => '',
+			's_notify_email'         => '',
 			's_proactive_text'       => array(),
 			's_greeting'             => array(),
 			's_welcome_back'         => array(),
@@ -295,6 +299,10 @@ class ControllerExtensionModuleAichat extends Controller {
 		return $s;
 	}
 
+	/**
+	 * Avatar picker from catalog/view/javascript/aichat/avatars/manifest.json
+	 * ([{id, name}]). Without a readable manifest only the built-in default.
+	 */
 	private function avatars() {
 		$list = array();
 		$file = DIR_CATALOG . 'view/javascript/aichat/avatars/manifest.json';
@@ -302,24 +310,32 @@ class ControllerExtensionModuleAichat extends Controller {
 			$json = json_decode((string)file_get_contents($file), true);
 			if (is_array($json)) {
 				foreach ($json as $item) {
-					if (is_array($item) && !empty($item['id']) && preg_match('/^[A-Za-z0-9_-]+$/', $item['id'])) {
-						$list[] = array('id' => $item['id'], 'name' => isset($item['name']) ? (string)$item['name'] : $item['id']);
+					if (is_array($item) && !empty($item['id']) && is_string($item['id']) && preg_match('/^[A-Za-z0-9_-]+$/', $item['id'])) {
+						$list[] = array('id' => $item['id'], 'name' => isset($item['name']) && is_scalar($item['name']) ? (string)$item['name'] : $item['id']);
 					}
 				}
 			}
 		}
 
 		if (!$list) {
-			$list = array(
-				array('id' => 'default', 'name' => $this->str('text_avatar_default')),
-				array('id' => 'robot', 'name' => 'Robot'),
-				array('id' => 'fox', 'name' => 'Fox'),
-				array('id' => 'owl', 'name' => 'Owl'),
-				array('id' => 'cat', 'name' => 'Cat')
-			);
+			$list = array(array('id' => 'default', 'name' => $this->str('text_avatar_default')));
 		}
 
 		return $list;
+	}
+
+	/** Saved avatar id if it is in the picker, else "default" (or the first avatar when there is no "default"). */
+	private function avatarChoice($saved, array $avatars) {
+		$ids = array();
+		foreach ($avatars as $a) {
+			$ids[] = $a['id'];
+		}
+
+		if (in_array((string)$saved, $ids, true)) {
+			return (string)$saved;
+		}
+
+		return in_array('default', $ids, true) ? 'default' : (string)$ids[0];
 	}
 
 	// ------------------------------------------------------------------
@@ -443,6 +459,9 @@ class ControllerExtensionModuleAichat extends Controller {
 				'type'      => isset($c['type']) && $c['type'] === 'speedy' ? 'speedy' : 'link',
 				'hosts'     => is_array($hosts) ? implode(', ', $hosts) : (string)$hosts,
 				'track_url' => isset($c['track_url']) ? (string)$c['track_url'] : '',
+				'pattern'   => isset($c['pattern']) ? (string)$c['pattern'] : '',
+				'aliases'   => isset($c['aliases']) ? (is_array($c['aliases']) ? implode(', ', $c['aliases']) : (string)$c['aliases']) : '',
+				'advanced'  => (isset($c['pattern']) && (string)$c['pattern'] !== '') || !empty($c['aliases']),
 				'secret'    => ($hasCourierSecret && $code !== '') ? (bool)$settings->hasCourierSecret($code) : false
 			);
 		}
@@ -470,10 +489,14 @@ class ControllerExtensionModuleAichat extends Controller {
 			$s['s_courier'] = isset($s['s_courier']) ? (string)$s['s_courier'] : '';
 			$s['s_couriers'] = isset($s['s_couriers']) && is_array($s['s_couriers']) ? array_values(array_map('strval', $s['s_couriers'])) : array();
 			$s['s_tg_chat_id'] = isset($s['s_tg_chat_id']) ? (string)$s['s_tg_chat_id'] : '';
+			$s['s_avatar'] = $this->avatarChoice(isset($s['s_avatar']) ? $s['s_avatar'] : '', $data['avatars']);
+			$s['store_name_auto'] = class_exists('\\Aichat\\StoreInfo') ? \Aichat\StoreInfo::name($this->registry, $sid, null) : $store['name'];
+			$s['notify_auto'] = class_exists('\\Aichat\\StoreInfo') ? \Aichat\StoreInfo::get($this->registry, $sid, null)['email'] : '';
 			$data['stores'][] = array('store_id' => $sid, 'name' => $store['name'], 's' => $s);
 		}
 
 		$data['factory'] = $factory;
+		$data['test_mail_url'] = $this->link('extension/module/aichat/test_mail');
 		$data['start_tab'] = isset($this->request->get['tab']) ? preg_replace('/[^a-z]/', '', $this->request->get['tab']) : '';
 
 		$data['header'] = $this->load->controller('common/header');
@@ -535,7 +558,9 @@ class ControllerExtensionModuleAichat extends Controller {
 				'name'      => $name,
 				'type'      => isset($row['type']) && $row['type'] === 'speedy' ? 'speedy' : 'link',
 				'hosts'     => array_values(array_unique($hosts)),
-				'track_url' => trim(isset($row['track_url']) ? $row['track_url'] : '')
+				'track_url' => trim(isset($row['track_url']) ? $row['track_url'] : ''),
+				'pattern'   => trim(isset($row['pattern']) ? (string)$row['pattern'] : ''),
+				'aliases'   => array_values(array_unique(array_filter(array_map('trim', preg_split('/[,;\n]+/u', isset($row['aliases']) ? (string)$row['aliases'] : ''))))),
 			);
 		}
 
@@ -576,6 +601,10 @@ class ControllerExtensionModuleAichat extends Controller {
 		$out = array();
 		$out['s_status'] = empty($in['s_status']) ? 0 : 1;
 		$out['s_bot_name'] = isset($in['s_bot_name']) ? trim($in['s_bot_name']) : '';
+		$out['s_store_name'] = isset($in['s_store_name']) ? trim(function_exists('mb_substr') ? mb_substr($in['s_store_name'], 0, 64) : substr($in['s_store_name'], 0, 64)) : '';
+		$out['s_notify_email'] = isset($in['s_notify_email']) ? trim($in['s_notify_email']) : '';
+		$out['s_attention'] = empty($in['s_attention']) ? 0 : 1;
+		$out['s_attention_interval'] = isset($in['s_attention_interval']) && ctype_digit(trim($in['s_attention_interval'])) ? (int)trim($in['s_attention_interval']) : 5;
 		$out['s_avatar'] = isset($in['s_avatar']) && preg_match('/^[A-Za-z0-9_-]+$/', $in['s_avatar']) ? $in['s_avatar'] : 'default';
 
 		foreach (array('s_greeting', 's_welcome_back', 's_quick_replies', 's_launcher_text') as $k) {
@@ -730,6 +759,8 @@ class ControllerExtensionModuleAichat extends Controller {
 				$e = $this->language->get('error_courier_url');
 			} elseif ($c['type'] === 'link' && $c['track_url'] === '') {
 				$e = $this->language->get('error_courier_url');
+			} elseif ($c['pattern'] !== '' && class_exists('\\Aichat\\Settings') && \Aichat\Settings::patternRegex($c['pattern']) === '') {
+				$e = $this->language->get('error_courier_pattern');
 			}
 			$u = isset($post['courier_secret'][$i]['username']) ? trim($post['courier_secret'][$i]['username']) : '';
 			$p = isset($post['courier_secret'][$i]['password']) ? (string)$post['courier_secret'][$i]['password'] : '';
@@ -755,7 +786,7 @@ class ControllerExtensionModuleAichat extends Controller {
 			$ranges = array('s_max_chats_day' => array(0, 100000), 's_max_msgs_chat' => array(1, 1000), 's_max_msgs_minute' => array(1, 100), 's_max_len' => array(50, 4000),
 				's_resume_days' => array(0, 365), 's_launcher_size' => array(32, 120), 's_launcher_avatar_size' => array(0, 100), 's_zindex' => array(1, 2147483647),
 				's_pos_desktop_x' => array(0, 1000), 's_pos_desktop_y' => array(0, 1000), 's_pos_mobile_x' => array(0, 500), 's_pos_mobile_y' => array(0, 1000),
-				's_handover_timeout' => array(10, 600), 's_proactive_delay' => array(0, 600));
+				's_handover_timeout' => array(10, 600), 's_proactive_delay' => array(0, 600), 's_attention_interval' => array(2, 600));
 			foreach ($ranges as $k => $r) {
 				if (!$this->isInt(isset($s[$k]) ? $s[$k] : '', $r[0], $r[1])) {
 					$this->error[$p . $k] = sprintf($this->language->get('error_range'), $r[0], $r[1]);
@@ -763,6 +794,9 @@ class ControllerExtensionModuleAichat extends Controller {
 			}
 			if (trim(isset($s['s_tg_chat_id']) ? $s['s_tg_chat_id'] : '') !== '' && !preg_match('/^-?\d{5,20}$/', trim($s['s_tg_chat_id']))) {
 				$this->error[$p . 's_tg_chat_id'] = $this->language->get('error_tg_chat');
+			}
+			if (trim(isset($s['s_notify_email']) ? $s['s_notify_email'] : '') !== '' && !filter_var(trim($s['s_notify_email']), FILTER_VALIDATE_EMAIL)) {
+				$this->error[$p . 's_notify_email'] = $this->language->get('error_email');
 			}
 			if (!empty($s['s_contacts']['email']) && !filter_var($s['s_contacts']['email'], FILTER_VALIDATE_EMAIL)) {
 				$this->error[$p . 'email'] = $this->language->get('error_email');
@@ -1348,6 +1382,55 @@ class ControllerExtensionModuleAichat extends Controller {
 	}
 
 	// ------------------------------------------------------------------
+	// "Send test e-mail" per store (ajax): the real mail path and its real result
+	// ------------------------------------------------------------------
+
+	/** POST store_id, [notify_email] (unsaved form value) -> {success, message} */
+	public function test_mail() {
+		if (!$this->needModify()) {
+			return $this->json(array('success' => false, 'message' => $this->str('error_permission')));
+		}
+
+		if (!class_exists('\\Aichat\\StoreInfo')) {
+			return $this->json(array('success' => false, 'message' => 'library missing'));
+		}
+
+		$post = $this->post();
+		$storeId = isset($post['store_id']) ? (int)$post['store_id'] : 0;
+		$valid = false;
+		foreach ($this->storeList() as $st) {
+			$valid = $valid || (int)$st['store_id'] === $storeId;
+		}
+		if (!$valid) {
+			return $this->json(array('success' => false, 'message' => 'store not found'));
+		}
+
+		$settings = $this->settings();
+		$typed = isset($post['notify_email']) ? trim($post['notify_email']) : '';
+		if ($typed !== '' && !filter_var($typed, FILTER_VALIDATE_EMAIL)) {
+			return $this->json(array('success' => false, 'message' => $this->str('error_email')));
+		}
+		$to = $typed !== '' ? $typed : \Aichat\StoreInfo::notifyEmail($this->registry, $settings, $storeId);
+		if ($to === '') {
+			return $this->json(array('success' => false, 'message' => $this->str('error_test_mail_no_recipient')));
+		}
+
+		$info = \Aichat\StoreInfo::get($this->registry, $storeId, $settings);
+		$result = \Aichat\Mailer::deliver($this->registry, $to, 'AI Chat: test e-mail – ' . $info['name'], sprintf($this->str('text_test_mail_body'), $info['name'], date('Y-m-d H:i:s')), array(
+			'store_id' => $storeId,
+			'settings' => $settings,
+			'from'     => $info['email'] !== '' ? $info['email'] : $to,
+			'sender'   => $info['name'] . ' · AI Chat',
+		));
+
+		if (!$result['ok']) {
+			return $this->json(array('success' => false, 'message' => sprintf($this->str('error_test_mail'), $to, $result['engine'], $result['error'])));
+		}
+
+		$this->json(array('success' => true, 'message' => sprintf($this->str('text_test_mail_ok'), $to, $result['engine'])));
+	}
+
+	// ------------------------------------------------------------------
 	// Telegram buttons on the settings page (ajax)
 	// ------------------------------------------------------------------
 
@@ -1634,7 +1717,8 @@ class ControllerExtensionModuleAichat extends Controller {
 		$f = array(
 			'type'     => isset($get['filter_type']) ? $get['filter_type'] : '',
 			'status'   => isset($get['filter_status']) ? $get['filter_status'] : '',
-			'store_id' => isset($get['filter_store_id']) ? $get['filter_store_id'] : ''
+			'store_id' => isset($get['filter_store_id']) ? $get['filter_store_id'] : '',
+			'mail_failed' => !empty($get['filter_mail_failed']) ? 1 : 0
 		);
 		$page = isset($get['page']) ? max(1, (int)$get['page']) : 1;
 		$limit = 20;
@@ -1654,7 +1738,7 @@ class ControllerExtensionModuleAichat extends Controller {
 		}
 
 		$query = '';
-		foreach (array('filter_type', 'filter_status', 'filter_store_id') as $k) {
+		foreach (array('filter_type', 'filter_status', 'filter_store_id', 'filter_mail_failed') as $k) {
 			if (isset($get[$k]) && $get[$k] !== '') {
 				$query .= '&' . $k . '=' . urlencode($get[$k]);
 			}
@@ -1662,7 +1746,7 @@ class ControllerExtensionModuleAichat extends Controller {
 		$pg = $this->paginate($total, $page, $limit, 'extension/module/aichat/requests', $query);
 		$data['pagination'] = $pg['html'];
 		$data['results'] = $pg['results'];
-		$data['filter'] = array('type' => (string)$f['type'], 'status' => (string)$f['status'], 'store_id' => (string)$f['store_id']);
+		$data['filter'] = array('type' => (string)$f['type'], 'status' => (string)$f['status'], 'store_id' => (string)$f['store_id'], 'mail_failed' => $f['mail_failed']);
 		$data['stores'] = $this->storeList();
 		$data['clear'] = $this->url->link('extension/module/aichat/requests', 'user_token=' . $token, true);
 		$data['can_modify'] = $this->user->hasPermission('modify', 'extension/module/aichat');
@@ -1678,7 +1762,7 @@ class ControllerExtensionModuleAichat extends Controller {
 	private function requestRow($r, $names, $m, $token) {
 		$d = $r['data'] ? json_decode($r['data'], true) : array();
 		$d = is_array($d) ? $d : array();
-		$type = in_array($r['type'], array('contact', 'stock', 'return'), true) ? $r['type'] : 'contact';
+		$type = in_array($r['type'], array('contact', 'stock', 'return', 'order'), true) ? $r['type'] : 'contact';
 
 		$productId = (int)$r['product_id'];
 		$productName = isset($d['product']) && is_string($d['product']) ? $d['product'] : '';
@@ -1690,6 +1774,9 @@ class ControllerExtensionModuleAichat extends Controller {
 			$summary = isset($d['note']) ? (string)$d['note'] : '';
 		} elseif ($type === 'stock') {
 			$summary = $productName;
+		} elseif ($type === 'order') {
+			$kind = isset($d['kind']) ? $this->str('rq_kind_' . $d['kind']) : '';
+			$summary = trim(($kind !== '' && strpos($kind, 'rq_kind_') !== 0 ? $kind : '') . (isset($d['details']) && $d['details'] !== '' ? ' - ' . $d['details'] : ''), ' -');
 		} else {
 			$summary = trim($productName . (isset($d['reason']) && $d['reason'] !== '' ? ' - ' . $d['reason'] : ''));
 		}
@@ -1705,7 +1792,12 @@ class ControllerExtensionModuleAichat extends Controller {
 						$images[] = array('thumb' => $this->link('extension/module/aichat/image', '&upload_id=' . $uid . '&thumb=1'), 'full' => $this->link('extension/module/aichat/image', '&upload_id=' . $uid));
 					}
 				}
-			} elseif (is_scalar($v) && (string)$v !== '' && !in_array($k, array('language_id'), true)) {
+			} elseif (is_scalar($v) && (string)$v !== '' && !in_array($k, array('language_id', 'mail_error'), true)) {
+				if ($k === 'verified') {
+					$v = $this->str('rq_verified_' . $v);
+				} elseif ($k === 'kind') {
+					$v = $this->str('rq_kind_' . $v);
+				}
 				$label = $this->str('rq_field_' . $k);
 				$fields[] = array('label' => $label === 'rq_field_' . $k ? $k : $label, 'value' => (string)$v, 'url' => in_array($k, array('page'), true) ? $this->safeUrl($v) : '');
 			}
@@ -1731,7 +1823,11 @@ class ControllerExtensionModuleAichat extends Controller {
 			'conversation_url' => $cid ? $this->url->link('extension/module/aichat/conversation', 'user_token=' . $token . '&conversation_id=' . $cid, true) : '',
 			'conversation_gone' => $cid && !$m->conversationExists($cid),
 			'fields'   => $fields,
-			'images'   => $images
+			'images'   => $images,
+			// null = before schema 4 / not attempted, 1 sent, 0 failed
+			'mailed'   => array_key_exists('mailed', $r) && $r['mailed'] !== null ? (int)$r['mailed'] : -1,
+			'mail_error' => isset($d['mail_error']) ? (string)$d['mail_error'] : '',
+			'mail_to'  => isset($d['mail_to']) ? (string)$d['mail_to'] : ''
 		);
 	}
 

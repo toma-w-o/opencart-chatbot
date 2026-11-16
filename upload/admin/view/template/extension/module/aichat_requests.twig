@@ -25,7 +25,9 @@
               <select name="filter_type" class="form-control"><option value="">{{ text_all }}</option>
                 <option value="contact"{% if filter.type == 'contact' %} selected="selected"{% endif %}>{{ text_rq_contact }}</option>
                 <option value="stock"{% if filter.type == 'stock' %} selected="selected"{% endif %}>{{ text_rq_stock }}</option>
-                <option value="return"{% if filter.type == 'return' %} selected="selected"{% endif %}>{{ text_rq_return }}</option></select></div>
+                <option value="return"{% if filter.type == 'return' %} selected="selected"{% endif %}>{{ text_rq_return }}</option>
+                <option value="order"{% if filter.type == 'order' %} selected="selected"{% endif %}>{{ text_rq_order }}</option></select>
+              <label class="aichat-small" style="font-weight:normal;margin-top:6px"><input type="checkbox" name="filter_mail_failed" value="1"{% if filter.mail_failed %} checked="checked"{% endif %} /> {{ text_rq_mail_failed_only }}</label></div>
             <div class="col-sm-3"><label>{{ text_status }}</label>
               <select name="filter_status" class="form-control"><option value="">{{ text_all }}</option>
                 <option value="new"{% if filter.status == 'new' %} selected="selected"{% endif %}>{{ text_rq_new }}</option>
@@ -55,7 +57,8 @@
             <tr class="aichat-rq-row{% if r.status == 'done' %} is-done{% endif %}" data-id="{{ r.id }}">
               <td>{{ r.id }}</td>
               <td class="aichat-nowrap aichat-small">{{ r.date }}</td>
-              <td class="aichat-nowrap">{% if r.type == 'contact' %}<span class="label label-info"><i class="fa fa-user"></i> {{ text_rq_contact }}</span>{% elseif r.type == 'stock' %}<span class="label label-warning"><i class="fa fa-bell"></i> {{ text_rq_stock }}</span>{% else %}<span class="label label-danger"><i class="fa fa-undo"></i> {{ text_rq_return }}</span>{% endif %}</td>
+              <td class="aichat-nowrap">{% if r.type == 'contact' %}<span class="label label-info"><i class="fa fa-user"></i> {{ text_rq_contact }}</span>{% elseif r.type == 'stock' %}<span class="label label-warning"><i class="fa fa-bell"></i> {{ text_rq_stock }}</span>{% elseif r.type == 'order' %}<span class="label label-primary"><i class="fa fa-pencil"></i> {{ text_rq_order }}</span>{% else %}<span class="label label-danger"><i class="fa fa-undo"></i> {{ text_rq_return }}</span>{% endif %}
+                {% if r.mailed == 0 %}<br /><span class="label label-warning aichat-rq-mailfail" title="{{ r.mail_error|e('html_attr') }}"><i class="fa fa-exclamation-triangle"></i> {{ text_rq_mail_failed }}</span>{% endif %}</td>
               <td><span class="label label-default">{{ r.store|e }}</span></td>
               <td class="aichat-small">{% if r.email %}<a href="mailto:{{ r.email|e('html_attr') }}">{{ r.email|e }}</a><br />{% endif %}{{ r.phone|e }}</td>
               <td class="aichat-cut-wide">{{ r.summary|e }}</td>
@@ -74,6 +77,7 @@
                     {% if r.product_id %}<dt>{{ text_product }}</dt><dd><a href="{{ r.product_url }}" target="_blank" rel="noopener">{{ r.product|e }}</a> <span class="aichat-muted">#{{ r.product_id }}</span></dd>{% endif %}
                     {% if r.email %}<dt>{{ entry_email }}</dt><dd>{{ r.email|e }}</dd>{% endif %}
                     {% if r.phone %}<dt>{{ entry_phone }}</dt><dd>{{ r.phone|e }}</dd>{% endif %}
+                    {% if r.mailed == 1 %}<dt>{{ text_rq_mail }}</dt><dd class="text-success"><i class="fa fa-check"></i> {{ text_rq_mail_sent }} {{ r.mail_to|e }}</dd>{% elseif r.mailed == 0 %}<dt>{{ text_rq_mail }}</dt><dd class="text-danger"><i class="fa fa-exclamation-triangle"></i> {{ text_rq_mail_failed }}{% if r.mail_to %} ({{ r.mail_to|e }}){% endif %}: {{ r.mail_error|e }}</dd>{% endif %}
                   </dl>
                 </div>
                 <div class="col-sm-6">

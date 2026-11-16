@@ -321,7 +321,7 @@ class Guard {
 	private function mailWarning($registry, $scope, $storeId, $spent, $budget) {
 		$config = $registry->get('config');
 		$to = trim((string)$this->settings->getGlobal('g_warn_email'));
-		$storeName = html_entity_decode((string)$config->get('config_name'), ENT_QUOTES, 'UTF-8');
+		$storeName = StoreInfo::name($registry, $storeId === null ? 0 : (int)$storeId, $this->settings);
 		$from = trim((string)$config->get('config_email'));
 
 		if ($storeId === null || (int)$storeId !== (int)$config->get('config_store_id')) {
@@ -330,9 +330,6 @@ class Guard {
 			foreach ($row as $r) {
 				if ($r['key'] === 'config_email' && $to === '') {
 					$to = trim($r['value']);
-				}
-				if ($r['key'] === 'config_name' && $storeId === null) {
-					$storeName = html_entity_decode($r['value'], ENT_QUOTES, 'UTF-8');
 				}
 			}
 		}
@@ -351,29 +348,8 @@ class Guard {
 			. "When the budget is reached the chat stops answering until next month or until the budget is raised in the admin (Extensions > Modules > AI Chat).\n\n"
 			. "AI Chat е използвал " . sprintf('%.2f', $spent) . " от месечния бюджет " . sprintf('%.2f', $budget) . " USD (" . $what . ").\n";
 
-		if (defined('AICHAT_MAIL_FILE')) {
-			return @file_put_contents((string)constant('AICHAT_MAIL_FILE'), "To: " . $to . "\nSubject: " . $subject . "\n\n" . $text . "\n----\n", FILE_APPEND) !== false;
-		}
-
-		if (!class_exists('Mail')) {
-			return false;
-		}
-
-		$mail = new \Mail($config->get('config_mail_engine'));
-		$mail->parameter = $config->get('config_mail_parameter');
-		$mail->smtp_hostname = $config->get('config_mail_smtp_hostname');
-		$mail->smtp_username = $config->get('config_mail_smtp_username');
-		$mail->smtp_password = html_entity_decode((string)$config->get('config_mail_smtp_password'), ENT_QUOTES, 'UTF-8');
-		$mail->smtp_port = $config->get('config_mail_smtp_port');
-		$mail->smtp_timeout = $config->get('config_mail_smtp_timeout');
-		$mail->setTo($to);
-		$mail->setFrom($from !== '' ? $from : $to);
-		$mail->setSender($storeName);
-		$mail->setSubject($subject);
-		$mail->setText($text);
-		$mail->send();
-
-		return true;
+		// OpenCart's mail engine + settings of the store concerned (store 0 for "all stores")
+		return Mailer::send($registry, $to, $subject, $text, array('store_id' => $storeId === null ? 0 : (int)$storeId, 'from' => $from !== '' ? $from : $to, 'sender' => $storeName));
 	}
 
 	/** USD spent in the current calendar month; $storeId null = all stores. */

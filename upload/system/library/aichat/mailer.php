@@ -2,65 +2,124 @@
 namespace Aichat;
 
 /**
- * Plain-text e-mail through OpenCart's Mail class.
+ * Plain-text e-mail through OpenCart's own Mail class, built exactly like
+ * OpenCart 3.0.3.6 builds it (catalog/controller/mail/order.php): engine =
+ * config_mail_engine, parameter, smtp_* settings, smtp password
+ * html-entity-decoded, setFrom / setSender / setSubject / setText.
+ *
+ * Differences to the old version (round 4, "request recorded but no e-mail"):
+ *  - the mail settings are those of the store the mail is about (store 0
+ *    rows, overridden by the store's own rows: what the catalog loads for
+ *    that store), not whatever store the current request runs under (admin,
+ *    Telegram webhook);
+ *  - the outcome is returned with an error text (deliver()); exceptions, PHP
+ *    errors (\Error) and PHP warnings raised while sending are caught and
+ *    reported instead of being lost; every failure is written to the
+ *    OpenCart error log;
+ *  - engine "mail": mail() being disabled or the sendmail binary missing is
+ *    reported as an error (OpenCart ignores mail()'s return value, so these
+ *    were invisible before).
  *
  * Test hook: with the constant AICHAT_MAIL_FILE defined the mail is appended
  * to that file ("To:", "Subject:", "Reply-To:", "Attachment:" lines, blank
  * line, body, "----") instead of being sent.
  */
 class Mailer {
-	/**
-	 * @param object $registry
-	 * @param string $to          recipient (validated)
-	 * @param string $subject
-	 * @param string $text        plain text body
-	 * @param array  $options     from, sender, reply_to, attachments (absolute paths), store_id (sender settings)
-	 * @return bool
-	 */
+	/** @return bool */
 	public static function send($registry, $to, $subject, $text, array $options = array()) {
+		$result = self::deliver($registry, $to, $subject, $text, $options);
+
+		return $result['ok'];
+	}
+
+	/**
+	 * @param array $options from, sender, reply_to, attachments (absolute paths),
+	 *                       store_id (whose mail settings / sender to use; default: current store)
+	 * @return array {ok: bool, error: string, engine: string}
+	 */
+	public static function deliver($registry, $to, $subject, $text, array $options = array()) {
 		$to = trim((string)$to);
+		$config = $registry->get('config');
+		$storeId = isset($options['store_id']) ? (int)$options['store_id'] : ($config ? (int)$config->get('config_store_id') : 0);
+		$info = StoreInfo::get($registry, $storeId, isset($options['settings']) && $options['settings'] instanceof Settings ? $options['settings'] : null);
+		$mailCfg = $info['mail'];
+		$engine = $mailCfg['config_mail_engine'] !== '' ? strtolower($mailCfg['config_mail_engine']) : 'mail';
 
 		if ($to === '' || !filter_var($to, FILTER_VALIDATE_EMAIL)) {
-			return false;
+			return self::failed($registry, 'no valid recipient address' . ($to !== '' ? ' (' . $to . ')' : ''), $engine);
 		}
 
-		$config = $registry->get('config');
-		$from = isset($options['from']) ? trim((string)$options['from']) : trim((string)$config->get('config_email'));
-		$sender = isset($options['sender']) ? (string)$options['sender'] : html_entity_decode((string)$config->get('config_name'), ENT_QUOTES, 'UTF-8');
+		$from = isset($options['from']) ? trim((string)$options['from']) : $info['email'];
+		$sender = isset($options['sender']) ? (string)$options['sender'] : $info['name'];
 		$replyTo = isset($options['reply_to']) ? trim((string)$options['reply_to']) : '';
 		$attachments = isset($options['attachments']) && is_array($options['attachments']) ? $options['attachments'] : array();
-		$subject = self::oneLine($subject);
+		$subject = self::oneLine(html_entity_decode((string)$subject, ENT_QUOTES, 'UTF-8'));
+		$sender = self::oneLine(html_entity_decode($sender, ENT_QUOTES, 'UTF-8'));
 
+		if ($from === '' || !filter_var($from, FILTER_VALIDATE_EMAIL)) {
+			$from = $to;
+		}
 		if ($replyTo !== '' && !filter_var($replyTo, FILTER_VALIDATE_EMAIL)) {
 			$replyTo = '';
 		}
+		if ($sender === '') {
+			$sender = $info['name'];
+		}
 
 		if (defined('AICHAT_MAIL_FILE')) {
-			$head = "To: " . $to . "\nSubject: " . $subject . "\n";
+			$head = "To: " . $to . "\nFrom: " . $from . "\nSender: " . $sender . "\nSubject: " . $subject . "\n";
 			if ($replyTo !== '') {
 				$head .= "Reply-To: " . $replyTo . "\n";
 			}
 			foreach ($attachments as $file) {
 				$head .= "Attachment: " . basename((string)$file) . (is_file($file) ? ' (' . filesize($file) . ' bytes)' : ' (missing)') . "\n";
 			}
-			return @file_put_contents((string)constant('AICHAT_MAIL_FILE'), $head . "\n" . $text . "\n----\n", FILE_APPEND | LOCK_EX) !== false;
+			$ok = @file_put_contents((string)constant('AICHAT_MAIL_FILE'), $head . "\n" . $text . "\n----\n", FILE_APPEND | LOCK_EX) !== false;
+
+			return $ok ? array('ok' => true, 'error' => '', 'engine' => 'file') : self::failed($registry, 'test mail file not writable', 'file');
 		}
 
 		if (!class_exists('Mail')) {
-			return false;
+			return self::failed($registry, 'OpenCart Mail class not available', $engine);
 		}
 
+		// OpenCart's Mail constructor calls exit() for an unknown engine: check first
+		if (!preg_match('/^[a-z0-9_]+$/', $engine) || !class_exists('Mail\\' . $engine)) {
+			return self::failed($registry, 'unknown mail engine "' . $engine . '" (System > Settings > Mail)', $engine);
+		}
+
+		if ($engine === 'mail') {
+			$problem = self::mailFunctionProblem();
+			if ($problem !== '') {
+				return self::failed($registry, $problem, $engine);
+			}
+		}
+
+		if ($engine === 'smtp' && trim($mailCfg['config_mail_smtp_hostname']) === '') {
+			return self::failed($registry, 'SMTP engine without SMTP hostname (System > Settings > Mail)', $engine);
+		}
+
+		$warnings = array();
+		set_error_handler(function ($code, $message) use (&$warnings) {
+			if (error_reporting() !== 0 && !in_array($code, array(E_DEPRECATED, E_USER_DEPRECATED, E_NOTICE, E_USER_NOTICE), true)) {
+				$warnings[] = $message;
+			}
+			return true;
+		});
+
+		$error = '';
+
 		try {
-			$mail = new \Mail($config->get('config_mail_engine'));
-			$mail->parameter = $config->get('config_mail_parameter');
-			$mail->smtp_hostname = $config->get('config_mail_smtp_hostname');
-			$mail->smtp_username = $config->get('config_mail_smtp_username');
-			$mail->smtp_password = html_entity_decode((string)$config->get('config_mail_smtp_password'), ENT_QUOTES, 'UTF-8');
-			$mail->smtp_port = $config->get('config_mail_smtp_port');
-			$mail->smtp_timeout = $config->get('config_mail_smtp_timeout');
+			$mail = new \Mail($engine);
+			$mail->parameter = $mailCfg['config_mail_parameter'];
+			$mail->smtp_hostname = $mailCfg['config_mail_smtp_hostname'];
+			$mail->smtp_username = $mailCfg['config_mail_smtp_username'];
+			$mail->smtp_password = html_entity_decode($mailCfg['config_mail_smtp_password'], ENT_QUOTES, 'UTF-8');
+			$mail->smtp_port = $mailCfg['config_mail_smtp_port'] !== '' ? $mailCfg['config_mail_smtp_port'] : 25;
+			$mail->smtp_timeout = $mailCfg['config_mail_smtp_timeout'] !== '' ? $mailCfg['config_mail_smtp_timeout'] : 5;
 			$mail->setTo($to);
-			$mail->setFrom($from !== '' ? $from : $to);
-			$mail->setSender(self::oneLine($sender));
+			$mail->setFrom($from);
+			$mail->setSender($sender);
 			if ($replyTo !== '') {
 				$mail->setReplyTo($replyTo);
 			}
@@ -73,69 +132,63 @@ class Mailer {
 			}
 			$mail->send();
 		} catch (\Exception $e) {
-			$log = $registry->get('log');
-			if ($log) {
-				$log->write('AI Chat mail: ' . $e->getMessage());
-			}
-			return false;
+			$error = $e->getMessage();
+		} catch (\Error $e) {
+			$error = get_class($e) . ': ' . $e->getMessage();
 		}
 
-		return true;
+		restore_error_handler();
+
+		if ($error === '' && $warnings) {
+			$error = implode('; ', array_unique($warnings));
+		}
+
+		if ($error !== '') {
+			return self::failed($registry, $error, $engine);
+		}
+
+		return array('ok' => true, 'error' => '', 'engine' => $engine);
 	}
 
-	/**
-	 * The store's e-mail for requests and transcripts: s_contacts.email, else
-	 * the store's config_email (read from the database, so it works for any store).
-	 */
+	/** Why PHP mail() cannot work here, or '' (OpenCart itself never checks). */
+	private static function mailFunctionProblem() {
+		$disabled = array_map('trim', explode(',', strtolower((string)ini_get('disable_functions'))));
+
+		if (!function_exists('mail') || in_array('mail', $disabled, true)) {
+			return 'PHP mail() is disabled on this server: choose SMTP in System > Settings > Mail';
+		}
+
+		if (strtoupper(substr(PHP_OS, 0, 3)) !== 'WIN') {
+			$path = trim((string)ini_get('sendmail_path'));
+			$bin = $path !== '' ? strtok($path, ' ') : '/usr/sbin/sendmail';
+			if ($bin !== false && strpos($bin, '/') === 0 && !@is_executable($bin)) {
+				return 'PHP mail(): sendmail program not found (' . $bin . '): choose SMTP in System > Settings > Mail';
+			}
+		}
+
+		return '';
+	}
+
+	private static function failed($registry, $error, $engine) {
+		$log = $registry->get('log');
+
+		if ($log) {
+			$log->write('AI Chat mail not sent (' . $engine . '): ' . $error);
+		}
+
+		return array('ok' => false, 'error' => (string)$error, 'engine' => (string)$engine);
+	}
+
+	/** Request recipient: s_notify_email -> the store's config_email (see StoreInfo). */
 	public static function storeEmail($registry, Settings $settings, $storeId) {
-		$contacts = $settings->getStore($storeId, 's_contacts');
-
-		if (is_array($contacts) && !empty($contacts['email']) && filter_var(trim($contacts['email']), FILTER_VALIDATE_EMAIL)) {
-			return trim($contacts['email']);
-		}
-
-		$info = self::storeConfig($registry, $storeId);
-
-		return $info['email'];
+		return StoreInfo::notifyEmail($registry, $settings, $storeId);
 	}
 
-	/** {name, email, url} of a store from its `config` settings. */
-	public static function storeConfig($registry, $storeId) {
-		$db = $registry->get('db');
-		$out = array('name' => '', 'email' => '', 'url' => '');
-		$rows = $db->query("SELECT `store_id`, `key`, `value` FROM `" . DB_PREFIX . "setting` WHERE `store_id` IN ('0', '" . (int)$storeId . "') AND `code` = 'config' AND `key` IN ('config_email', 'config_name', 'config_url') ORDER BY `store_id` ASC")->rows;
+	/** {name, email, url} of a store (name resolved, never empty). */
+	public static function storeConfig($registry, $storeId, Settings $settings = null) {
+		$info = StoreInfo::get($registry, $storeId, $settings ? $settings : new Settings($registry));
 
-		foreach ($rows as $row) {
-			// store-specific values override store 0
-			$key = substr($row['key'], 7);
-			if ((int)$row['store_id'] === (int)$storeId || $out[$key] === '') {
-				$out[$key] = html_entity_decode(trim((string)$row['value']), ENT_QUOTES, 'UTF-8');
-			}
-		}
-
-		if ((int)$storeId > 0) {
-			$store = $db->query("SELECT `name`, `url` FROM `" . DB_PREFIX . "store` WHERE `store_id` = '" . (int)$storeId . "'")->row;
-			if ($store) {
-				$out['name'] = $out['name'] !== '' && self::hasOwn($rows, $storeId, 'config_name') ? $out['name'] : html_entity_decode((string)$store['name'], ENT_QUOTES, 'UTF-8');
-				$out['url'] = self::hasOwn($rows, $storeId, 'config_url') ? $out['url'] : (string)$store['url'];
-			}
-		} elseif (defined('HTTP_CATALOG') && $out['url'] === '') {
-			$out['url'] = HTTP_CATALOG;
-		} elseif (defined('HTTP_SERVER') && $out['url'] === '') {
-			$out['url'] = HTTP_SERVER;
-		}
-
-		return $out;
-	}
-
-	private static function hasOwn(array $rows, $storeId, $key) {
-		foreach ($rows as $row) {
-			if ((int)$row['store_id'] === (int)$storeId && $row['key'] === $key) {
-				return true;
-			}
-		}
-
-		return false;
+		return array('name' => $info['name'], 'email' => $info['email'], 'url' => $info['url']);
 	}
 
 	public static function oneLine($text) {

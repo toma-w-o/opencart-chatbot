@@ -216,6 +216,13 @@
                     <div class="row">
                       <div class="col-sm-12"><label>{{ entry_courier_url }}</label><input type="text" name="couriers[{{ c.idx }}][track_url]" value="{{ c.track_url|e('html_attr') }}" class="form-control" placeholder="https://www.speedy.bg/bg/track-shipment?shipmentNumber={number}" /></div>
                     </div>
+                    <details class="aichat-courier-adv"{% if c.advanced and errors['courier_' ~ c.idx] %} open{% endif %}>
+                      <summary>{{ text_courier_advanced }}</summary>
+                      <div class="row">
+                        <div class="col-sm-6"><label>{{ entry_courier_pattern }}</label><input type="text" name="couriers[{{ c.idx }}][pattern]" value="{{ c.pattern|e('html_attr') }}" class="form-control aichat-mono" placeholder="^6\d{10}$" /><p class="help-block">{{ help_courier_pattern }}</p></div>
+                        <div class="col-sm-6"><label>{{ entry_courier_aliases }}</label><input type="text" name="couriers[{{ c.idx }}][aliases]" value="{{ c.aliases|e('html_attr') }}" class="form-control" placeholder="Спиди, Speedy" /><p class="help-block">{{ help_courier_aliases }}</p></div>
+                      </div>
+                    </details>
                     <div class="row aichat-courier-secret">
                       <div class="col-sm-4"><label>{{ entry_courier_user }}</label><input type="text" name="courier_secret[{{ c.idx }}][username]" value="" class="form-control" autocomplete="off" placeholder="{{ c.secret ? text_saved : '' }}" /></div>
                       <div class="col-sm-4"><label>{{ entry_courier_pass }}</label><input type="password" name="courier_secret[{{ c.idx }}][password]" value="" class="form-control" autocomplete="new-password" placeholder="{{ c.secret ? text_saved : '' }}" /></div>
@@ -244,6 +251,13 @@
                     <div class="row">
                       <div class="col-sm-12"><label>{{ entry_courier_url }}</label><input type="text" name="couriers[__I__][track_url]" value="" class="form-control" placeholder="https://example.com/track?number={number}" /></div>
                     </div>
+                    <details class="aichat-courier-adv">
+                      <summary>{{ text_courier_advanced }}</summary>
+                      <div class="row">
+                        <div class="col-sm-6"><label>{{ entry_courier_pattern }}</label><input type="text" name="couriers[__I__][pattern]" value="" class="form-control aichat-mono" placeholder="^1000\d{9}$" /><p class="help-block">{{ help_courier_pattern }}</p></div>
+                        <div class="col-sm-6"><label>{{ entry_courier_aliases }}</label><input type="text" name="couriers[__I__][aliases]" value="" class="form-control" /><p class="help-block">{{ help_courier_aliases }}</p></div>
+                      </div>
+                    </details>
                     <div class="row aichat-courier-secret">
                       <div class="col-sm-4"><label>{{ entry_courier_user }}</label><input type="text" name="courier_secret[__I__][username]" value="" class="form-control" autocomplete="off" /></div>
                       <div class="col-sm-4"><label>{{ entry_courier_pass }}</label><input type="password" name="courier_secret[__I__][password]" value="" class="form-control" autocomplete="new-password" /></div>
@@ -365,6 +379,11 @@
                   <label class="col-sm-2 control-label" for="input-s{{ sid }}-name">{{ entry_bot_name }}</label>
                   <div class="col-sm-4"><input type="text" name="s[{{ sid }}][s_bot_name]" value="{{ s.s_bot_name|e('html_attr') }}" id="input-s{{ sid }}-name" class="form-control" />
                     <div class="help-block">{{ help_bot_name }}</div></div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-2 control-label" for="input-s{{ sid }}-storename">{{ entry_store_name }}</label>
+                  <div class="col-sm-4"><input type="text" name="s[{{ sid }}][s_store_name]" value="{{ s.s_store_name|e('html_attr') }}" id="input-s{{ sid }}-storename" class="form-control" maxlength="64" placeholder="{{ s.store_name_auto|e('html_attr') }}" />
+                    <div class="help-block">{{ help_store_name|format(s.store_name_auto)|e }}</div></div>
                 </div>
                 <div class="form-group">
                   <label class="col-sm-2 control-label">{{ entry_avatar }}</label>
@@ -526,6 +545,23 @@
                     </fieldset>
 
                     <fieldset>
+                      <legend>{{ text_attention }}</legend>
+                      <div class="form-group">
+                        <label class="col-sm-4 control-label" for="input-s{{ sid }}-attention">{{ entry_attention }}</label>
+                        <div class="col-sm-3">
+                          <select name="s[{{ sid }}][s_attention]" id="input-s{{ sid }}-attention" class="form-control" data-default="1">
+                            <option value="1"{% if s.s_attention %} selected="selected"{% endif %}>{{ text_enabled }}</option>
+                            <option value="0"{% if not s.s_attention %} selected="selected"{% endif %}>{{ text_disabled }}</option>
+                          </select>
+                        </div>
+                        <label class="col-sm-2 control-label" for="input-s{{ sid }}-attint">{{ entry_attention_interval }}</label>
+                        <div class="col-sm-3"><div class="input-group"><input type="text" name="s[{{ sid }}][s_attention_interval]" value="{{ s.s_attention_interval|e('html_attr') }}" id="input-s{{ sid }}-attint" class="form-control" data-default="5" /><span class="input-group-addon">{{ text_seconds }}</span></div>
+                          {% if errors[p ~ 's_attention_interval'] %}<div class="text-danger aichat-err">{{ errors[p ~ 's_attention_interval'] }}</div>{% endif %}</div>
+                        <div class="col-sm-offset-4 col-sm-8"><div class="help-block">{{ help_attention }}</div></div>
+                      </div>
+                    </fieldset>
+
+                    <fieldset>
                       <legend>{{ text_custom_css }}</legend>
                       <textarea name="s[{{ sid }}][s_custom_css]" rows="4" class="form-control aichat-mono" data-default="" placeholder="#aichat-root .aichat-launcher { box-shadow: none; }">{{ s.s_custom_css|e }}</textarea>
                       <div class="help-block">{{ help_custom_css }}</div>
@@ -585,6 +621,20 @@
                     <label class="col-sm-2 control-label" for="input-s{{ sid }}-note">{{ entry_note }}</label>
                     <div class="col-sm-10"><textarea name="s[{{ sid }}][s_contacts][note]" rows="2" id="input-s{{ sid }}-note" class="form-control">{{ s.s_contacts.note|e }}</textarea>
                       <div class="help-block">{{ help_contact_note }}</div></div>
+                  </div>
+                </fieldset>
+                <fieldset>
+                  <legend>{{ text_notify_title }}</legend>
+                  <div class="help-block aichat-legend-help">{{ help_notify }}</div>
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-notify">{{ entry_notify_email }}</label>
+                    <div class="col-sm-4">
+                      <input type="text" name="s[{{ sid }}][s_notify_email]" value="{{ s.s_notify_email|e('html_attr') }}" id="input-s{{ sid }}-notify" class="form-control aichat-notify-email" placeholder="{{ s.notify_auto|e('html_attr') }}" />
+                      {% if errors[p ~ 's_notify_email'] %}<div class="text-danger aichat-err">{{ errors[p ~ 's_notify_email'] }}</div>{% endif %}
+                      <div class="help-block">{{ help_notify_email|format(s.notify_auto ? s.notify_auto : '-')|e }}</div>
+                    </div>
+                    <div class="col-sm-2"><button type="button" class="btn btn-default btn-sm aichat-test-mail" data-url="{{ test_mail_url }}" data-store="{{ sid }}" style="margin-top:2px"><i class="fa fa-envelope-o"></i> {{ button_test_mail }}</button></div>
+                    <div class="col-sm-4"><span class="aichat-tg-result aichat-test-mail-result"></span></div>
                   </div>
                 </fieldset>
                 <fieldset>

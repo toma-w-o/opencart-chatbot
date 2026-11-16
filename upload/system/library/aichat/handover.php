@@ -63,7 +63,7 @@ class Handover {
 
 		$chatId = $this->telegram->chatFor($storeId);
 		$topic = ((string)$conversation['tg_chat_id'] === $chatId) ? (int)$conversation['tg_topic_id'] : 0;
-		$storeInfo = Mailer::storeConfig($this->registry, $storeId);
+		$storeInfo = Mailer::storeConfig($this->registry, $storeId, $this->settings);
 		$cid = (int)$conversation['conversation_id'];
 
 		if (!$topic) {
@@ -95,10 +95,15 @@ class Handover {
 
 		$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `mode` = 'waiting', `waiting_since` = NOW(), `tg_chat_id` = '" . $this->db->escape($chatId) . "', `tg_topic_id` = '" . (int)$topic . "', `staff_name` = '', `date_modified` = NOW() WHERE `conversation_id` = '" . $cid . "'");
 
+		$timeout = self::timeoutOf($store);
+		$strings = self::strings($this->db, (int)$conversation['language_id']);
+		$waitText = self::waitPhrase($strings, $timeout);
+
 		return array(
-			'status'  => 'waiting',
-			'timeout_seconds' => (int)$store['s_handover_timeout'],
-			'message' => 'A colleague has been notified and will join this chat shortly. Tell the customer in one short sentence that a colleague will join in a moment and that they can keep writing here. Do not promise a time.',
+			'status'          => 'waiting',
+			'timeout_seconds' => $timeout,
+			'wait_text'       => $waitText,
+			'message'         => 'A colleague has been notified. Tell the customer exactly this (translated only if they write in another language): "' . $waitText . '" The chat window shows a countdown. Add nothing else and promise no other time.',
 		);
 	}
 
@@ -155,7 +160,7 @@ class Handover {
 			return false;
 		}
 
-		$timeout = max(10, (int)$this->settings->getStore((int)$conversation['store_id'], 's_handover_timeout'));
+		$timeout = self::timeoutOf($this->settings->getStore((int)$conversation['store_id']));
 		$since = strtotime($conversation['waiting_since']);
 
 		if (!$since || $since + $timeout > time()) {
@@ -177,6 +182,73 @@ class Handover {
 		}
 
 		return true;
+	}
+
+	/** Effective handover timeout of a store in seconds (s_handover_timeout, at least 10). */
+	public static function timeoutOf(array $store) {
+		return max(10, isset($store['s_handover_timeout']) ? (int)$store['s_handover_timeout'] : 60);
+	}
+
+	/**
+	 * While waiting: {wait_until (unix time), wait_seconds (left, >= 0),
+	 * wait_text}; otherwise an empty array. For boot / poll / send done.
+	 */
+	public function waitInfo($conversation) {
+		if (!is_array($conversation) || $conversation['mode'] !== 'waiting' || empty($conversation['waiting_since'])) {
+			return array();
+		}
+
+		$timeout = self::timeoutOf($this->settings->getStore((int)$conversation['store_id']));
+		$since = strtotime($conversation['waiting_since']);
+		$since = $since ? $since : time();
+		$until = $since + $timeout;
+
+		return array(
+			'wait_until'   => $until,
+			'wait_seconds' => max(0, $until - time()),
+			'wait_text'    => self::waitPhrase(self::strings($this->db, (int)$conversation['language_id']), $timeout),
+		);
+	}
+
+	/**
+	 * "Прехвърлям ви към колега. Това може да отнеме до 1 минута. Моля, изчакайте."
+	 * Seconds below 60, otherwise whole minutes (rounded up: "up to").
+	 *
+	 * @param array $strings catalog language strings (strings() / stringsFor())
+	 */
+	public static function waitPhrase(array $strings, $seconds) {
+		$seconds = max(1, (int)$seconds);
+		$s = $strings + array(
+			'handover_wait'    => 'I am transferring you to a colleague. This may take up to %s. Please wait.',
+			'wait_second_one'  => '%d second',
+			'wait_second_many' => '%d seconds',
+			'wait_minute_one'  => '%d minute',
+			'wait_minute_many' => '%d minutes',
+		);
+
+		if ($seconds < 60) {
+			$amount = sprintf($seconds === 1 ? $s['wait_second_one'] : $s['wait_second_many'], $seconds);
+		} else {
+			$minutes = (int)ceil($seconds / 60);
+			$amount = sprintf($minutes === 1 ? $s['wait_minute_one'] : $s['wait_minute_many'], $minutes);
+		}
+
+		return sprintf($s['handover_wait'], $amount);
+	}
+
+	/** Catalog language strings by language code (en-gb first, then the code). */
+	public static function stringsFor($code) {
+		$_ = array();
+		$base = defined('DIR_CATALOG') ? DIR_CATALOG : (defined('DIR_APPLICATION') ? DIR_APPLICATION : '');
+
+		foreach (array_unique(array('en-gb', strtolower((string)$code))) as $c) {
+			$file = $base . 'language/' . $c . '/extension/module/aichat.php';
+			if ($base !== '' && preg_match('/^[a-z]{2}(-[a-z]{2})?$/', $c) && is_file($file)) {
+				include $file;
+			}
+		}
+
+		return $_;
 	}
 
 	// ================================================================ webhook

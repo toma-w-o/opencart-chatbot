@@ -233,6 +233,21 @@
 			tgCall($(this), {chat_id: $.trim($st.find('.aichat-tg-store-chat').val()) || $.trim($('#input-tg-chat').val())}, $st.find('.aichat-tg-store-result'));
 		});
 
+		// "Send test e-mail" per store: sends through the store's mail settings and shows the real outcome
+		$form.on('click', '.aichat-test-mail', function () {
+			var $btn = $(this), $st = $btn.closest('.aichat-store'), $out = $st.find('.aichat-test-mail-result');
+			var data = {user_token: $form.find('input[name="user_token"]').val() || window.AICHAT_UT || '', store_id: $btn.data('store'), notify_email: $.trim($st.find('.aichat-notify-email').val())};
+			$btn.prop('disabled', true).find('i').addClass('fa-spin');
+			$out.removeClass('is-ok is-bad').text('...');
+			$.post($btn.data('url'), data, null, 'json').done(function (r) {
+				$out.addClass(r && r.success ? 'is-ok' : 'is-bad').text((r && r.message) || 'Error');
+			}).fail(function (x) {
+				$out.addClass('is-bad').text('Error ' + (x && x.status ? x.status : ''));
+			}).always(function () {
+				$btn.prop('disabled', false).find('i').removeClass('fa-spin');
+			});
+		});
+
 		// colours: picker <-> text
 		$form.on('input change', '.aichat-colorpick', function () {
 			$(this).siblings('.aichat-colortext').val($(this).val()).trigger('input');

@@ -388,7 +388,8 @@ class Orders {
 			$out['totals'][] = array('title' => $this->text($t['title']), 'value' => $this->money($t['value'], $currency, $value));
 		}
 
-		// history: only what the customer was notified about
+		// history: status changes the customer was notified about (as OpenCart's own
+		// account/order page shows them), with the comment text of those rows only
 		foreach ($this->history($orderId) as $h) {
 			$entry = array('date' => date('Y-m-d H:i', strtotime($h['date_added'])), 'status' => $this->text($h['status']));
 			$comment = $this->cleanComment($h['comment']);
@@ -398,12 +399,19 @@ class Orders {
 			$out['history'][] = $entry;
 		}
 
-		// tracking
+		// tracking: numbers with the detected courier and how it was detected
 		$tracking = $this->tracking($order);
 		foreach ($tracking as $t) {
 			$this->allow($t);
-			$out['tracking'][] = array('number' => $t['number'], 'courier' => $t['courier_name']);
+			$item = array('number' => $t['number'], 'courier' => $t['courier_name'] !== '' ? $t['courier_name'] : 'unknown', 'courier_detected_by' => $t['detected_by']);
+			$out['tracking'][] = $item;
 		}
+		if ($tracking) {
+			$out['tracking_note'] = 'courier_detected_by: link = from the courier link in a comment, number_format = the number matches that courier\'s format, comment = the courier is named in the same comment, status = named in the order status, shipping_method = from the shipping method, store_default = the store\'s usual courier (a guess), none = unknown. Several numbers usually mean several parcels.';
+		}
+
+		$stage = $this->stage($order, $tracking);
+		$out['stage'] = $stage['stage'];
 
 		$view = $this->viewOrderLink($order);
 
@@ -418,20 +426,141 @@ class Orders {
 		return $out;
 	}
 
+	/** History rows with notify = 1 (the only ones whose comments the visitor may see). */
 	private function history($orderId) {
 		return $this->db->query("SELECT oh.date_added, oh.comment, os.name AS status FROM `" . DB_PREFIX . "order_history` oh"
 			. " LEFT JOIN `" . DB_PREFIX . "order_status` os ON (os.order_status_id = oh.order_status_id AND os.language_id = '" . (int)$this->languageId . "')"
 			. " WHERE oh.order_id = '" . (int)$orderId . "' AND oh.notify = '1' ORDER BY oh.date_added, oh.order_history_id LIMIT 50")->rows;
 	}
 
-	/** Comment text for the model: plain text, links replaced (tracking comes as cards). */
+	/**
+	 * Status names of the order (all its history rows + the current status, in
+	 * every language). Used only to detect the courier ("Изпратена с
+	 * NextLevel"); never sent to the model. No comments are read here.
+	 */
+	private function statusNames(array $order) {
+		$rows = $this->db->query("SELECT DISTINCT os.name FROM `" . DB_PREFIX . "order_status` os WHERE os.order_status_id IN ("
+			. "SELECT oh.order_status_id FROM `" . DB_PREFIX . "order_history` oh WHERE oh.order_id = '" . (int)$order['order_id'] . "'"
+			. ") OR os.order_status_id = '" . (int)$order['order_status_id'] . "'")->rows;
+		$out = array();
+
+		foreach ($rows as $row) {
+			$out[] = $this->text($row['name']);
+		}
+
+		return implode(' | ', $out);
+	}
+
+	/**
+	 * Comment text for the model: plain text, links replaced (tracking comes as
+	 * cards), payment / transaction lines removed, length-capped.
+	 */
 	private function cleanComment($comment) {
 		$text = html_entity_decode((string)$comment, ENT_QUOTES, 'UTF-8');
 		$text = strip_tags(preg_replace('/<br\s*\/?>/i', "\n", $text));
+		$text = self::stripPayment($text);
 		$text = preg_replace('~(?:https?://|www\.)[^\s<>"\']+~i', '[link]', $text);
 		$text = trim(preg_replace("/[ \t]+/", ' ', $text));
 
 		return function_exists('mb_substr') ? mb_substr($text, 0, 500, 'UTF-8') : substr($text, 0, 500);
+	}
+
+	/** Removes sentences / lines about payments and transaction ids (gateway notes). */
+	public static function stripPayment($text) {
+		$parts = preg_split('/(\n|(?<=[.!?])\s+)/u', (string)$text);
+		$keep = array();
+
+		foreach ($parts as $part) {
+			if (preg_match('/(transaction|транзакци|συναλλαγ|payment|плащане|πληρωμ|revolut|paypal|stripe|epay|borica|борика|mypos|card\s*\*|\bID\s*:\s*[0-9a-f]{6,}-)/iu', $part)) {
+				continue;
+			}
+			$keep[] = $part;
+		}
+
+		return trim(implode(' ', $keep));
+	}
+
+	// ================================================================ order stage (change requests)
+
+	/**
+	 * delivered | shipped | open, decided conservatively:
+	 *
+	 *  - delivered: the current status name says delivered / complete
+	 *    ("Доставена", "Delivered", "Complete", "Παραδόθηκε"), or the status is
+	 *    one of the store's config_complete_status AND its name does not say
+	 *    shipped AND the order has no tracking number. (OpenCart's default
+	 *    complete list is Complete + Shipped, so the list alone cannot tell
+	 *    "delivered" from "on its way".)
+	 *  - shipped: the name says shipped / sent / in transit, or the order has
+	 *    any tracking number.
+	 *  - open: everything else (pending, processing, preparing ...).
+	 *
+	 * When unsure we answer "shipped", never "delivered": a request a colleague
+	 * then turns down costs nothing, a customer wrongly told to file a return
+	 * for an undelivered parcel is a real problem.
+	 *
+	 * @return array {stage, status}
+	 */
+	public function stage(array $order, $tracking = null) {
+		$names = array();
+		foreach ($this->db->query("SELECT `name` FROM `" . DB_PREFIX . "order_status` WHERE `order_status_id` = '" . (int)$order['order_status_id'] . "'")->rows as $row) {
+			$names[] = $this->text($row['name']);
+		}
+		$name = implode(' | ', $names);
+		$tracking = is_array($tracking) ? $tracking : $this->tracking($order);
+		$complete = $this->config->get('config_complete_status');
+		$complete = is_array($complete) ? array_map('intval', $complete) : array();
+		$shippedWords = '/(ship|sent|dispatch|transit|out for delivery|изпрат|експедир|предаден|на път|в процес на доставка|απεστάλ|σε μεταφορ|σε διανομ)/iu';
+		$deliveredWords = '/(deliver(ed)?\b|complete|достав(ен|ена|ено|ени)\b|получен|завърш|изпълнен|приключ|παραδόθ|παραδοθ|ολοκληρ)/iu';
+		$saysShipped = (bool)preg_match($shippedWords, $name);
+
+		if (preg_match($deliveredWords, $name) && !preg_match('/out for delivery/i', $name)) {
+			return array('stage' => 'delivered', 'status' => $name);
+		}
+
+		if (in_array((int)$order['order_status_id'], $complete, true) && !$saysShipped && !$tracking) {
+			return array('stage' => 'delivered', 'status' => $name);
+		}
+
+		if ($saysShipped || $tracking) {
+			return array('stage' => 'shipped', 'status' => $name);
+		}
+
+		return array('stage' => 'open', 'status' => $name);
+	}
+
+	/** How the visitor may see this order: "logged_in" (own) or "phone" (number + phone in this chat). */
+	public function verifiedBy(array $order) {
+		$customerId = $this->customerId();
+
+		if ($customerId && (int)$order['customer_id'] === $customerId) {
+			return 'logged_in';
+		}
+
+		return ($this->conversation && (int)$this->conversation['verified_order_id'] === (int)$order['order_id']) ? 'phone' : '';
+	}
+
+	/** Plain-text order summary for the store's e-mail. */
+	public function summaryText(array $order) {
+		$lines = array();
+		$status = $this->db->query("SELECT `name` FROM `" . DB_PREFIX . "order_status` WHERE `order_status_id` = '" . (int)$order['order_status_id'] . "' AND `language_id` = '" . (int)$this->languageId . "'")->row;
+		$lines[] = 'Order #' . (int)$order['order_id'] . ' · ' . date('Y-m-d', strtotime($order['date_added'])) . ' · ' . ($status ? $this->text($status['name']) : '') . ' · ' . $this->money($order['total'], $order['currency_code'], $order['currency_value']);
+		$lines[] = 'Customer: ' . $this->text($order['firstname'] . ' ' . $order['lastname']) . ', ' . $order['email'] . ', ' . $order['telephone'];
+		$address = array();
+		foreach (array('shipping_firstname', 'shipping_lastname', 'shipping_address_1', 'shipping_address_2', 'shipping_city', 'shipping_postcode', 'shipping_country') as $k) {
+			if (isset($order[$k]) && trim((string)$order[$k]) !== '') {
+				$address[] = $this->text($order[$k]);
+			}
+		}
+		$lines[] = 'Delivery: ' . $this->text($order['shipping_method']) . ($address ? ' – ' . implode(', ', $address) : '');
+		foreach ($this->orderProducts($order) as $p) {
+			$lines[] = '  - ' . $p['name'] . ($p['model'] !== '' ? ' (' . $p['model'] . ')' : '') . ' x' . $p['quantity'];
+		}
+		foreach ($this->tracking($order) as $t) {
+			$lines[] = 'Tracking: ' . $t['number'] . ($t['courier_name'] !== '' ? ' (' . $t['courier_name'] . ')' : '');
+		}
+
+		return implode("\n", $lines);
 	}
 
 	// ================================================================ tracking numbers
@@ -462,25 +591,32 @@ class Orders {
 	/**
 	 * Tracking numbers of an order: the order's own tracking-number column
 	 * (when the shop has one) and links / numbers in history comments with
-	 * notify = 1. Deduplicated, in order of appearance.
+	 * notify = 1 (comments with notify = 0 are never read). Deduplicated, in
+	 * order of appearance (oldest comment first, so the newest is last).
 	 *
-	 * @return array of {number, courier, courier_name, url, source}
+	 * @return array of {number, courier, courier_name, url, source, detected_by}
 	 */
 	public function tracking(array $order) {
 		$found = array();
 		// only the couriers enabled for this store (s_couriers, empty = all), default first
 		$couriers = $this->settings->storeCouriers($this->storeId);
 		$default = (string)$this->settings->getStore($this->storeId, 's_courier');
+		$context = array(
+			'order_id' => (string)(int)$order['order_id'],
+			'phone'    => isset($order['telephone']) ? (string)$order['telephone'] : '',
+			'statuses' => $this->statusNames($order),
+			'shipping' => isset($order['shipping_method']) ? $this->text($order['shipping_method']) : '',
+		);
 
 		$column = $this->trackingColumn();
 		if ($column && !empty($order[$column])) {
-			foreach (self::extract((string)$order[$column], $couriers, $default, true) as $t) {
+			foreach (self::extract((string)$order[$column], $couriers, $default, true, $context) as $t) {
 				$found[] = $t;
 			}
 		}
 
 		foreach ($this->history((int)$order['order_id']) as $h) {
-			foreach (self::extract((string)$h['comment'], $couriers, $default, false) as $t) {
+			foreach (self::extract((string)$h['comment'], $couriers, $default, false, $context) as $t) {
 				$found[] = $t;
 			}
 		}
@@ -491,8 +627,14 @@ class Orders {
 			$key = strtoupper($t['number']);
 			if (!isset($out[$key])) {
 				$out[$key] = $t;
-			} elseif ($out[$key]['courier'] === '' && $t['courier'] !== '') {
-				$out[$key] = $t;
+			} elseif (self::rank($t['detected_by']) > self::rank($out[$key]['detected_by'])) {
+				$out[$key]['courier'] = $t['courier'];
+				$out[$key]['detected_by'] = $t['detected_by'];
+				if ($t['source'] !== '') {
+					$out[$key]['source'] = $t['source'];
+				}
+			} elseif ($out[$key]['source'] === '' && $t['source'] !== '' && $t['courier'] === $out[$key]['courier']) {
+				$out[$key]['source'] = $t['source'];
 			}
 		}
 
@@ -506,18 +648,41 @@ class Orders {
 		return array_values($out);
 	}
 
+	/** Strength of a courier detection (higher wins when a number is found twice). */
+	private static function rank($by) {
+		$order = array('none' => 0, 'store_default' => 1, 'shipping_method' => 2, 'status' => 3, 'comment' => 4, 'number_format' => 5, 'link' => 6);
+
+		return isset($order[$by]) ? $order[$by] : 0;
+	}
+
+	/** Words around a bare number that make it a tracking number (bg, en, el). */
+	public static function trackingWords() {
+		return array('товарителниц', 'проследи', 'проследяване', 'пратк', 'куриер', 'tracking', 'track', 'awb', 'waybill', 'shipment', 'parcel', 'consignment', 'courier',
+			'αποστολ', 'παρακολούθ', 'παρακολουθ', 'δέμα', 'δεμα', 'κωδικός αποστολ', 'voucher', 'βάουτσερ', 'κούριερ', 'courier');
+	}
+
 	/**
 	 * Tracking numbers in a text. Public static for tests.
 	 *
-	 *  - URLs: courier from the host (g_couriers[].hosts), numbers from
-	 *    query values (several comma separated: shipmentNumber=1,2) and
-	 *    from long digit path segments;
-	 *  - bare numbers (8-20 digits) only in a dedicated tracking field, or
-	 *    in a comment that mentions a courier / shipment word.
+	 *  - URLs: courier from the host (g_couriers[].hosts), numbers from query
+	 *    values (several comma separated: shipmentNumber=1,2) and long digit
+	 *    path segments. Links to other hosts are ignored.
+	 *  - bare numbers (6-20 digits, optional short letter prefix/suffix):
+	 *    accepted when they match a courier `pattern`, or when the text right
+	 *    before them speaks of a shipment (trackingWords(), courier names), or
+	 *    always in a dedicated tracking field. Never: the order id, the
+	 *    customer's / a Bulgarian phone number, dates, decimal amounts,
+	 *    anything in a payment / transaction sentence.
+	 *  - courier: link host -> number pattern -> courier named in the same
+	 *    text -> courier named in the order's status names -> shipping method
+	 *    -> store default -> none. `detected_by` says which one.
+	 *
+	 * @param array $context order_id, phone, statuses (status names), shipping (method text)
 	 */
-	public static function extract($text, array $couriers, $defaultCourier, $isField) {
+	public static function extract($text, array $couriers, $defaultCourier, $isField, array $context = array()) {
 		$text = html_entity_decode((string)$text, ENT_QUOTES, 'UTF-8');
-		$text = str_replace('&amp;', '&', $text);
+		$text = str_replace('&amp;', '&', strip_tags(preg_replace('/<br\s*\/?>/i', "\n", $text)));
+		$text = self::stripPayment($text);
 		$out = array();
 
 		if (preg_match_all('~(?:https?://|www\.)[^\s<>"\']+~i', $text, $m)) {
@@ -553,33 +718,141 @@ class Orders {
 				}
 
 				foreach ($numbers as $n) {
-					$out[] = array('number' => $n, 'courier' => $code, 'source' => $full);
+					$out[] = array('number' => $n, 'courier' => $code, 'source' => $full, 'detected_by' => 'link');
 				}
 			}
 
 			$text = preg_replace('~(?:https?://|www\.)[^\s<>"\']+~i', ' ', $text);
 		}
 
-		$words = array('товарителниц', 'пратк', 'куриер', 'tracking', 'track', 'shipment', 'parcel', 'awb', 'courier', 'αποστολ', 'κωδικ', 'speedy', 'econt', 'спиди', 'еконт');
+		$words = self::trackingWords();
 		foreach ($couriers as $c) {
-			$words[] = preg_quote($c['name'], '/');
+			$words[] = $c['name'];
+			foreach ($c['aliases'] as $a) {
+				$words[] = $a;
+			}
 		}
-		$keywords = '/(' . implode('|', $words) . ')/iu';
+		$quoted = array();
+		foreach ($words as $w) {
+			if (trim((string)$w) !== '') {
+				$quoted[] = preg_quote(trim((string)$w), '/');
+			}
+		}
+		$keywords = '/(' . implode('|', $quoted) . ')/iu';
+		$orderId = isset($context['order_id']) ? (string)$context['order_id'] : '';
+		$phone = isset($context['phone']) ? self::digits($context['phone']) : '';
 
-		if ($isField || preg_match($keywords, $text)) {
-			if (preg_match_all('/(?<![\d+])\d{8,20}(?!\d)/', $text, $m)) {
-				foreach ($m[0] as $n) {
-					// a phone number is not a tracking number
-					if (!$isField && preg_match('/^(0|359)\d{8,9}$/', $n)) {
+		if (preg_match_all('/(?<![\w+\-\/.])([A-Za-z]{0,4}\d{6,20}[A-Za-z]{0,4})(?![\w\-\/]|[.,]\d{1,2}(?!\d))/u', $text, $m, PREG_OFFSET_CAPTURE)) {
+			foreach ($m[1] as $hit) {
+				$n = $hit[0];
+				$pos = $hit[1];
+				$digits = self::digits($n);
+
+				if ($digits === $orderId || ($orderId !== '' && $n === $orderId)) {
+					continue;
+				}
+				if ($phone !== '' && strlen($digits) >= 9 && strlen($digits) <= 13 && substr($digits, -9) === substr($phone, -9)) {
+					continue;
+				}
+				if ($digits === $n && preg_match('/^(0|359)8\d{8}$/', $n)) {
+					continue; // a Bulgarian mobile number
+				}
+				if ($digits === $n && strlen($n) === 8 && (self::isDate(substr($n, 0, 4), substr($n, 4, 2), substr($n, 6, 2)) || self::isDate(substr($n, 4, 4), substr($n, 2, 2), substr($n, 0, 2)))) {
+					continue; // 20261022 / 22102026
+				}
+
+				$code = '';
+				$by = '';
+				$matching = array();
+				foreach ($couriers as $cc => $c) {
+					if ($c['regex'] !== '' && preg_match($c['regex'], $n)) {
+						$matching[] = $cc;
+					}
+				}
+				if ($matching) {
+					$code = in_array($defaultCourier, $matching, true) ? $defaultCourier : $matching[0];
+					$by = 'number_format';
+				} else {
+					$before = function_exists('mb_strcut') ? mb_strcut($text, max(0, $pos - 120), min($pos, 120) + strlen($n) + 20, 'UTF-8') : substr($text, max(0, $pos - 120), 140);
+					if (!$isField && !preg_match($keywords, $before)) {
 						continue;
 					}
-					$code = isset($couriers[$defaultCourier]) ? $defaultCourier : '';
-					$out[] = array('number' => $n, 'courier' => $code, 'source' => '');
 				}
+
+				$out[] = array('number' => $n, 'courier' => $code, 'source' => '', 'detected_by' => $by);
+			}
+		}
+
+		// courier of the bare numbers without a pattern match
+		foreach ($out as $i => $t) {
+			if ($t['detected_by'] !== '') {
+				continue;
+			}
+			$sources = array(
+				'comment'         => $text,
+				'status'          => isset($context['statuses']) ? (string)$context['statuses'] : '',
+				'shipping_method' => isset($context['shipping']) ? (string)$context['shipping'] : '',
+			);
+			foreach ($sources as $by => $haystack) {
+				$code = self::courierNamedIn($haystack, $couriers, $defaultCourier);
+				if ($code !== '') {
+					$out[$i]['courier'] = $code;
+					$out[$i]['detected_by'] = $by;
+					continue 2;
+				}
+			}
+			if ($defaultCourier !== '' && isset($couriers[$defaultCourier])) {
+				$out[$i]['courier'] = $defaultCourier;
+				$out[$i]['detected_by'] = 'store_default';
+			} else {
+				$out[$i]['detected_by'] = 'none';
 			}
 		}
 
 		return $out;
+	}
+
+	private static function isDate($y, $mo, $d) {
+		return (int)$y >= 2000 && (int)$y <= 2099 && checkdate((int)$mo, (int)$d, (int)$y);
+	}
+
+	/**
+	 * The courier whose name, code or alias appears in a text (whole words,
+	 * case-insensitive). Several: the store default when it is among them,
+	 * else the first. '' when none.
+	 */
+	public static function courierNamedIn($text, array $couriers, $defaultCourier = '') {
+		$text = (string)$text;
+
+		if (trim($text) === '') {
+			return '';
+		}
+
+		$hits = array();
+
+		foreach ($couriers as $code => $c) {
+			$names = array_merge(array($c['name'], $code), $c['aliases']);
+			foreach ($names as $name) {
+				$name = trim((string)$name);
+				if (self::len($name) < 3) {
+					continue;
+				}
+				if (preg_match('/(?<![\p{L}\p{N}])' . preg_quote($name, '/') . '(?![\p{L}\p{N}])/iu', $text)) {
+					$hits[] = $code;
+					break;
+				}
+			}
+		}
+
+		if (!$hits) {
+			return '';
+		}
+
+		return in_array($defaultCourier, $hits, true) ? $defaultCourier : $hits[0];
+	}
+
+	private static function len($s) {
+		return function_exists('mb_strlen') ? mb_strlen((string)$s, 'UTF-8') : strlen((string)$s);
 	}
 
 	public static function courierForHost($host, array $couriers) {
