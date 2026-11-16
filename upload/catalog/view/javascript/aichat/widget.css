@@ -227,9 +227,16 @@ html.aichat-lock, html.aichat-lock body { overflow: hidden !important; }
 .aichat-root .aichat-who { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--aichat-muted); }
 .aichat-root .aichat-badge { width: 20px; height: 20px; border-radius: 50%; background: #2e9e5b; color: #fff !important; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; text-align: center; }
 .aichat-root .aichat-sys { align-self: center; text-align: center !important; font-size: 12px; color: var(--aichat-muted); background: var(--aichat-surface); padding: 4px 12px; border-radius: 12px; max-width: 90%; }
-.aichat-root .aichat-wait { align-self: center; display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--aichat-muted); background: var(--aichat-surface); padding: 6px 14px; border-radius: 14px; }
+.aichat-root .aichat-wait { align-self: center; display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--aichat-muted); background: var(--aichat-surface); padding: 7px 14px 7px 10px; border-radius: 16px; max-width: 94%; }
+.aichat-root .aichat-wait-ring { flex: 0 0 22px; width: 22px; height: 22px; display: none; }
+.aichat-root .aichat-wait.has-time .aichat-wait-ring, .aichat-root .aichat-wait.is-late .aichat-wait-ring { display: inline-block; }
+.aichat-root .aichat-wait-ring svg { width: 100%; height: 100%; display: block; }
+.aichat-root .aichat-wait-bg { fill: none; stroke: rgba(128,128,128,.28); stroke-width: 2.4; }
+.aichat-root .aichat-wait-fg { fill: none; stroke: var(--aichat-accent); stroke-width: 2.4; stroke-linecap: round; stroke-dasharray: 62.83; stroke-dashoffset: 0; transition: stroke-dashoffset .5s linear; }
+.aichat-root .aichat-wait.is-late .aichat-wait-fg { stroke-dasharray: 16 62.83; transform-box: fill-box; transform-origin: 50% 50%; animation: aichat-spinr 1s linear infinite; transition: none; }
 .aichat-root .aichat-wait-dots { display: inline-block; min-width: 1.4em; }
-.aichat-root .aichat-wait-time { opacity: .7; margin-left: 4px; font-variant-numeric: tabular-nums; }
+.aichat-root .aichat-wait-time { margin-left: 2px; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--aichat-text); min-width: 2.6em; text-align: right; }
+.aichat-root .aichat-wait-time:empty { display: none; }
 
 /* ratings */
 .aichat-root .aichat-rate { display: flex; gap: 2px; margin-top: -2px; }

@@ -62,6 +62,7 @@
     choose: ['Choose…', 'Изберете…', 'Επιλέξτε…'],
     verifying: ['Quick security check…', 'Кратка проверка за сигурност…', 'Γρήγορος έλεγχος ασφαλείας…'],
     connecting: ['Connecting you to a colleague', 'Свързваме ви с колега', 'Σας συνδέουμε με συνάδελφο'],
+    still_checking: ['Still checking, thank you for your patience', 'Още проверяваме, благодарим за търпението', 'Ελέγχουμε ακόμα, ευχαριστούμε για την υπομονή'],
     colleague: ['Colleague', 'Колега', 'Συνάδελφος'],
     attach: ['Attach a photo', 'Прикачи снимка', 'Επισύναψη φωτογραφίας'],
     remove: ['Remove', 'Премахни', 'Αφαίρεση'],
@@ -91,7 +92,7 @@
   var state = {
     boot: null, strings: {}, token: store.get(K_TOKEN) || '', open: false, busy: false,
     maxLen: 1000, mode: 'bot', avatar: 'default', botName: '', features: {}, appearance: {},
-    lastBoot: 0, lastId: 0, sent: false, unread: false, staffName: '', pics: [], okReply: false, booting: false
+    lastBoot: 0, lastId: 0, wait: null, sent: false, unread: false, staffName: '', pics: [], okReply: false, booting: false
   };
   var el = {};
 
@@ -197,6 +198,7 @@
     el.launcherText.textContent = text;
     el.launcherText.hidden = !text;
     applyPosition();
+    attnSchedule();
   }
   function applyPosition() {
     if (!el.root) { return; }
@@ -275,8 +277,10 @@
       '</svg>';
     return n;
   }
+  var DEFAULT_AV = 'nova';
   function loadAvatarSvg(id) {
-    if (!id || !/^[a-z0-9_-]+$/i.test(id) || id === 'default' || !avatarBase || !window.fetch) { return Promise.reject(); }
+    if (!id || id === 'default' || !/^[a-z0-9_-]+$/i.test(id)) { id = DEFAULT_AV; }
+    if (!avatarBase || !window.fetch) { return Promise.reject(); }
     if (!avCache[id]) {
       avCache[id] = fetch(avatarBase + id + '.svg', { credentials: 'omit' }).then(function (r) {
         if (!r.ok) { throw new Error('av'); }
@@ -293,7 +297,7 @@
   function paintAvatarState(n, st) {
     n.setAttribute('data-state', st);
     if (n.hasAttribute('data-loaded') && n.firstElementChild) {
-      var svg = n.firstElementChild, c = (svg.getAttribute('class') || '').replace(/\bis-[a-z]+\b/g, '').replace(/\s+/g, ' ').trim();
+      var svg = n.firstElementChild, c = (svg.getAttribute('class') || '').replace(/\bis-[a-z0-9-]+/g, '').replace(/\s+/g, ' ').trim();
       svg.setAttribute('class', c + ' is-' + st);
     }
   }
@@ -306,7 +310,7 @@
   }
   function setAvatarOf(n, name) {
     n.setAttribute('data-avatar', name || 'default');
-    loadAvatarSvg(name).then(function (s) {
+    loadAvatarSvg(name).catch(function () { return name === DEFAULT_AV || !name || name === 'default' ? Promise.reject() : loadAvatarSvg(DEFAULT_AV); }).then(function (s) {
       if (n.getAttribute('data-avatar') !== (name || 'default')) { return; }
       var st = n.getAttribute('data-state') || 'idle';
       n.innerHTML = s; n.setAttribute('data-loaded', '1'); paintAvatarState(n, st);
@@ -315,6 +319,43 @@
   function setAvatarState(st) {
     state.avState = st;
     for (var i = 0; i < avs.length; i++) { paintAvatarState(avs[i], st); }
+  }
+  /* attention gestures: a random short grimace on the launcher avatar while the panel is closed */
+  var attn = { timer: null, clear: null, last: 0, node: null };
+  function attnCfg() {
+    var a = (state.appearance && state.appearance.attention) || {};
+    return { enabled: !!a.enabled && a.enabled !== '0', interval: num(a.interval, 5, 3, 120) };
+  }
+  function attnEnd() {
+    clearTimeout(attn.clear); attn.clear = null;
+    if (attn.node) {
+      attn.node.setAttribute('class', (attn.node.getAttribute('class') || '').replace(/\s*\bis-attn-\d+/g, ''));
+      attn.node = null;
+    }
+  }
+  function attnStop() { clearTimeout(attn.timer); attn.timer = null; attnEnd(); }
+  function attnCan() {
+    return !state.open && !document.hidden && !mq('(prefers-reduced-motion: reduce)') && el.launcher && attnCfg().enabled;
+  }
+  function attnSchedule() {
+    attnStop();
+    if (!attnCan()) { return; }
+    attn.timer = setTimeout(attnFire, attnCfg().interval * 1000);
+  }
+  function attnFire() {
+    attn.timer = null;
+    if (!attnCan()) { return; }
+    attn.timer = setTimeout(attnFire, attnCfg().interval * 1000); // start-to-start interval
+    var n = el.launcher.querySelector('.aichat-av'), svg = n && n.hasAttribute('data-loaded') ? n.firstElementChild : null;
+    var cnt = svg ? parseInt(svg.getAttribute('data-gestures'), 10) || 0 : 0;
+    if (!cnt || state.busy || state.avState && state.avState !== 'idle') { return; }
+    var k;
+    do { k = 1 + Math.floor(Math.random() * cnt); } while (cnt > 1 && k === attn.last);
+    attn.last = k;
+    attnEnd();
+    svg.setAttribute('class', (svg.getAttribute('class') || '') + ' is-attn-' + k);
+    attn.node = svg;
+    attn.clear = setTimeout(attnEnd, 2600);
   }
   var listenTimer = null;
   function listening() {
@@ -660,9 +701,11 @@
       if (!el.list.children.length || Date.now() - state.lastBoot > 60000) { doBoot(true); }
       scrollDown(true);
       setTimeout(function () { el.input.focus({ preventScroll: true }); }, 30);
+      attnStop();
     } else {
       toggleEmoji(false); toggleMenu(false);
       el.launcher.focus({ preventScroll: true });
+      attnSchedule();
     }
   }
 
@@ -923,20 +966,39 @@
   }
   function hideTyping() { if (el.typing && el.typing.parentNode) { el.typing.parentNode.removeChild(el.typing); } el.typing = null; }
   var waitTimer = null;
+  function waitOf(o) { return o && (o.wait_until || o.wait_seconds) ? { until: o.wait_until, seconds: o.wait_seconds } : null; }
+  function waitDeadline(w) {
+    var now = Date.now(), tot = parseInt(w.seconds, 10) || 0, until = parseFloat(w.until) || 0;
+    var dl = until ? until * 1000 : (tot ? now + tot * 1000 : 0);
+    if (until && tot && dl - now > tot * 1000 + 5000) { dl = now + tot * 1000; } // browser clock behind the server's
+    if (!tot && dl) { tot = Math.max(1, Math.round((dl - now) / 1000)); }
+    return dl ? { until: dl, total: tot } : null;
+  }
+  function tickWait() {
+    var w = el.wait;
+    if (!w || !w.parentNode) { clearInterval(waitTimer); return; }
+    var p = w._p, left = state.wait ? Math.ceil((state.wait.until - Date.now()) / 1000) : null, late = left !== null && left <= 0;
+    p.dots.textContent = '...'.slice(0, (Math.floor(Date.now() / 1000) % 3) + 1);
+    w.classList.toggle('is-late', late);
+    w.classList.toggle('has-time', left !== null && !late);
+    p.label.textContent = late ? t('still_checking') : t('connecting');
+    if (left !== null && !late) {
+      p.time.textContent = Math.floor(left / 60) + ':' + (left % 60 < 10 ? '0' : '') + (left % 60);
+      var frac = Math.max(0, Math.min(1, (state.wait.until - Date.now()) / (state.wait.total * 1000)));
+      p.fg.style.strokeDashoffset = String(62.83 * (1 - frac));
+      w.setAttribute('aria-label', p.label.textContent + ' ' + p.time.textContent);
+    } else { p.time.textContent = ''; p.fg.style.strokeDashoffset = '0'; w.removeAttribute('aria-label'); }
+  }
   function showWait() {
-    if (el.wait && el.wait.parentNode) { return; }
+    if (el.wait && el.wait.parentNode) { tickWait(); return; }
     var w = h('div', 'aichat-wait', { role: 'status' });
+    var ring = h('span', 'aichat-wait-ring');
+    ring.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle class="aichat-wait-bg" cx="12" cy="12" r="10"/><circle class="aichat-wait-fg" cx="12" cy="12" r="10" transform="rotate(-90 12 12)"/></svg>';
     var label = h('span', 'aichat-wait-t'), dots = h('span', 'aichat-wait-dots'), time = h('span', 'aichat-wait-time');
-    label.textContent = t('connecting'); w.appendChild(label); w.appendChild(dots); w.appendChild(time);
+    w.appendChild(ring); w.appendChild(label); w.appendChild(dots); w.appendChild(time);
+    w._p = { label: label, dots: dots, time: time, fg: ring.querySelector('.aichat-wait-fg') };
     appendToList(w); el.wait = w; scrollDown(true);
-    var t0 = Date.now();
-    function tick() {
-      var s = Math.floor((Date.now() - t0) / 1000);
-      dots.textContent = new Array((s % 3) + 2).join('.') + '';
-      dots.textContent = '...'.slice(0, (s % 3) + 1);
-      time.textContent = Math.floor(s / 60) + ':' + (s % 60 < 10 ? '0' : '') + (s % 60);
-    }
-    tick(); clearInterval(waitTimer); waitTimer = setInterval(tick, 1000);
+    tickWait(); clearInterval(waitTimer); waitTimer = setInterval(tickWait, 500);
   }
   function hideWait() { clearInterval(waitTimer); if (el.wait && el.wait.parentNode) { el.wait.parentNode.removeChild(el.wait); } el.wait = null; }
 
@@ -949,7 +1011,7 @@
   /* ---------- handover mode + polling ---------- */
   var poll = { timer: null, busy: false, paused: false, hiddenAt: 0 };
   function human() { return state.mode === 'waiting' || state.mode === 'human'; }
-  function setMode(m, staffName) {
+  function setMode(m, staffName, wait) {
     if (!m) { return; }
     if (staffName) { state.staffName = staffName; }
     var was = state.mode;
@@ -957,7 +1019,11 @@
     if (m !== 'human' && m !== 'waiting') { state.staffName = ''; }
     el.sub.textContent = m === 'waiting' ? t('connecting') : m === 'human' ? (state.staffName || t('colleague')) : t('ai_label');
     el.root.setAttribute('data-mode', m);
-    if (m === 'waiting') { showWait(); } else { hideWait(); }
+    if (m === 'waiting') {
+      var d = wait ? waitDeadline(wait) : null;
+      if (d && (!state.wait || Math.abs(state.wait.until - d.until) > 1500 || was !== 'waiting')) { state.wait = d; }
+      showWait();
+    } else { state.wait = null; hideWait(); }
     if (human()) { startPoll(); } else { stopPoll(); }
     if (was !== m) { scrollDown(true); }
   }
@@ -983,7 +1049,7 @@
           else if (m.role === 'staff') { hideWait(); addMsg('staff', m.content || '', { name: m.staff_name || staff || state.staffName }); }
           else { hideWait(); var x = addMsg('bot', m.content || ''); if (id) { addRate(x.wrap, id, 0); } }
         });
-        if (j.mode) { setMode(j.mode, staff); }
+        if (j.mode) { setMode(j.mode, staff, waitOf(j)); }
         if (got) { notifyIncoming(); }
       })
       .catch(function () { /* keep polling */ })
@@ -1112,7 +1178,7 @@
     var m = addMsg('bot', j.reply);
     addProducts(m.wrap, j.products, j.products_label);
     addCards(m.wrap, j.cards);
-    if (j.mode) { setMode(j.mode); }
+    if (j.mode) { setMode(j.mode, undefined, waitOf(j)); }
     gotReply(m.wrap, j.message_id);
   }
   function sendPlain(text, opts) {
@@ -1123,7 +1189,7 @@
     }).then(function (r) { return r.json(); }).then(function (j) {
       hideTyping();
       if (j && j.error && j.error.code === 'challenge') { return { challenge: true, message: j.error.message }; }
-      if (j && !j.error && typeof j.reply !== 'string' && j.mode) { setMode(j.mode); return; }
+      if (j && !j.error && typeof j.reply !== 'string' && j.mode) { setMode(j.mode, undefined, waitOf(j)); return; }
       if (!j || j.error || typeof j.reply !== 'string') { showError(j && j.error && j.error.message); return; }
       renderReply(j);
     }).catch(function () { showError(); });
@@ -1146,7 +1212,7 @@
               return reject({ userMessage: j.error.message });
             }
             if (j && typeof j.reply === 'string') { renderReply(j); return resolve(); }
-            if (j && j.mode) { setMode(j.mode); return resolve(); }
+            if (j && j.mode) { setMode(j.mode, undefined, waitOf(j)); return resolve(); }
             reject({ fallback: true });
           }, function () { reject({ fallback: true }); });
         }
@@ -1172,7 +1238,7 @@
             got = true; addCards(ensureMsg().wrap, d.items);
           } else if (ev === 'done') {
             finished = true; paint();
-            if (d.mode) { setMode(d.mode); }
+            if (d.mode) { setMode(d.mode, undefined, waitOf(d)); }
             if (msg) { gotReply(msg.wrap, d.message_id); }
           } else if (ev === 'error') {
             finished = true; paint(); hideTyping();
@@ -1305,7 +1371,7 @@
     var botMode = !b.mode || b.mode === 'bot' || b.mode === 'closed';
     if (!hist.length) { addMsg('bot', (b.returning && b.welcome_back) || b.greeting || t('greeting')); if (botMode) { addChips(); } }
     else if (b.returning && b.welcome_back && botMode && !state.sent) { addMsg('bot', b.welcome_back); addChips(); }
-    setMode(b.mode || 'bot', b.staff_name);
+    setMode(b.mode || 'bot', b.staff_name, waitOf(b));
     scrollDown(true);
   }
   function applyBoot(b) {
@@ -1363,8 +1429,8 @@
     loadCss(); doBoot();
     window.addEventListener('pageshow', function (e) { if (e.persisted) { refreshIfStale(true); pollKick(); } });
     document.addEventListener('visibilitychange', function () {
-      if (document.hidden) { poll.hiddenAt = Date.now(); }
-      else { refreshIfStale(false); pollKick(); }
+      if (document.hidden) { poll.hiddenAt = Date.now(); attnStop(); }
+      else { refreshIfStale(false); pollKick(); attnSchedule(); }
     });
     window.addEventListener('online', function () { if (!el.root) { doBoot(); } });
   }

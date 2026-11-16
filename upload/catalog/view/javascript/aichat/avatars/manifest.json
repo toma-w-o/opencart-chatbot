@@ -1,38 +1,34 @@
 [
   {
-    "id": "maria",
-    "name": "Maria"
+    "id": "nova",
+    "name": "Nova"
   },
   {
-    "id": "ivan",
-    "name": "Ivan"
+    "id": "mint",
+    "name": "Mint"
   },
   {
-    "id": "nia",
-    "name": "Nia"
+    "id": "volt",
+    "name": "Volt"
   },
   {
-    "id": "robot",
-    "name": "Robo"
+    "id": "orbi",
+    "name": "Orbi"
   },
   {
-    "id": "mia",
-    "name": "Mia (cat)"
+    "id": "pixo",
+    "name": "Pixo"
   },
   {
-    "id": "bun",
-    "name": "Bun (bunny)"
+    "id": "lumo",
+    "name": "Lumo"
   },
   {
-    "id": "bru",
-    "name": "Bru (bear)"
+    "id": "echo",
+    "name": "Echo"
   },
   {
-    "id": "rex",
-    "name": "Rex (fox)"
-  },
-  {
-    "id": "glow",
-    "name": "Glow (orb)"
+    "id": "blip",
+    "name": "Blip"
   }
 ]
