@@ -114,3 +114,4 @@ $_['error_cost_limit'] = 'The chat limit for today has been reached. Please cont
 $_['error_transcript_unavailable'] = 'The conversation can be e-mailed only to the address of your account or of an order checked in this chat.';
 $_['text_transcript_unavailable'] = 'You can e-mail the conversation to yourself after logging in to your account, or after checking an order in this chat (it then goes to the order’s e-mail address).';
 $_['widget_transcript_confirm'] = 'Send the conversation to %s?';
+$_['text_order_hidden'] = 'The order details are hidden. Confirm the order number and phone again to see them.';

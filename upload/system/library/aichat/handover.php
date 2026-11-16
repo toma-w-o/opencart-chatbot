@@ -13,6 +13,8 @@ namespace Aichat;
  */
 class Handover {
 	const TRANSCRIPT_LINES = 30;
+	/** Tools whose results contain order data (address, items, tracking). */
+	const ORDER_TOOLS = array('find_order', 'my_order', 'my_orders', 'track_shipment', 'order_change_request', 'return_request');
 
 	private $registry;
 	private $db;
@@ -556,7 +558,7 @@ class Handover {
 	 * messages). Visitor lines are labelled as unverified by default; with
 	 * $filter (LinkFilter) every line goes through the link filter.
 	 */
-	public static function transcript($db, $conversationId, $limit = 200, array $labels = array(), LinkFilter $filter = null) {
+	public static function transcript($db, $conversationId, $limit = 200, array $labels = array(), LinkFilter $filter = null, $orderPlaceholder = '') {
 		$labels += array('user' => 'Visitor (unverified)', 'assistant' => 'Assistant', 'staff' => 'Staff', 'system' => '—');
 		$rows = $db->query("SELECT `role`, `content`, `meta`, `date_added` FROM `" . DB_PREFIX . "aichat_message` WHERE `conversation_id` = '" . (int)$conversationId . "' ORDER BY `message_id` DESC LIMIT " . (int)$limit)->rows;
 		$lines = array();
@@ -568,6 +570,9 @@ class Handover {
 				$who .= ' (' . $meta['staff_name'] . ')';
 			}
 			$text = trim((string)$row['content']);
+			if ($orderPlaceholder !== '' && $row['role'] === 'assistant' && self::usesOrderTools($meta)) {
+				$text = $orderPlaceholder; // a guest's order verification has lapsed
+			}
 			if ($filter) {
 				$text = trim($filter->filter($text));
 			}
@@ -592,6 +597,21 @@ class Handover {
 		}
 
 		return $lines ? implode("\n", $lines) : '(empty)';
+	}
+
+	/** The message meta shows an order tool was used (its text may contain order data). */
+	public static function usesOrderTools($meta) {
+		if (!is_array($meta) || empty($meta['tools']) || !is_array($meta['tools'])) {
+			return false;
+		}
+
+		foreach ($meta['tools'] as $call) {
+			if (is_array($call) && isset($call['name']) && in_array($call['name'], self::ORDER_TOOLS, true)) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**

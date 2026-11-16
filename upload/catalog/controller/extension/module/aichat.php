@@ -81,6 +81,7 @@ class ControllerExtensionModuleAichat extends Controller {
 		if ($conversation) {
 			$tools = new \Aichat\Tools($this->registry, $storeId, $languageId);
 			$tools->setContext($settings, $conversation, '');
+			$hideOrders = $this->orderDataHidden($conversation);
 
 			foreach ($this->model_extension_module_aichat->getMessages($conversation['conversation_id'], self::HISTORY_FOR_WIDGET, array('user', 'assistant', 'staff', 'system')) as $message) {
 				$item = array('role' => in_array($message['role'], array('user', 'staff', 'system'), true) ? $message['role'] : 'assistant', 'content' => $message['content'], 'message_id' => (int)$message['message_id']);
@@ -99,7 +100,13 @@ class ControllerExtensionModuleAichat extends Controller {
 					$item['product_groups'] = $groups;
 				}
 				if (!empty($message['meta']['cards']) && is_array($message['meta']['cards'])) {
-					$item['cards'] = array_values($message['meta']['cards']);
+					$item['cards'] = array_values(\Aichat\Orders::replayCards($message['meta']['cards'], $conversation));
+					if (!$item['cards']) {
+						unset($item['cards']);
+					}
+				}
+				if ($hideOrders && $item['role'] === 'assistant' && \Aichat\Handover::usesOrderTools($message['meta'])) {
+					$item['content'] = $this->language->get('text_order_hidden');
 				}
 				if ($item['content'] === '' && empty($item['products']) && empty($item['cards']) && empty($item['images'])) {
 					continue;
@@ -206,6 +213,38 @@ class ControllerExtensionModuleAichat extends Controller {
 		$expires = max($expires, time() + 60);
 
 		return $this->endpoint() . 'image&i=' . (int)$id . '&e=' . $expires . '&t=' . ($thumb ? 1 : 0) . '&s=' . $guard->imageSig((int)$id, $expires, $thumb);
+	}
+
+	/**
+	 * Order data of earlier turns may not be replayed: a guest conversation
+	 * whose order verification has lapsed (Orders::VERIFY_IDLE) or never
+	 * happened. A logged-in customer's own conversation keeps it.
+	 */
+	private function orderDataHidden($conversation) {
+		if (is_array($conversation) && (int)$conversation['customer_id'] > 0) {
+			return false;
+		}
+
+		return !\Aichat\Orders::verificationFresh($conversation);
+	}
+
+	/** Stored history for the model: lapsed order data replaced by the placeholder, order cards dropped. */
+	private function replayHistory(array $rows, $conversation) {
+		$hide = $this->orderDataHidden($conversation);
+
+		foreach ($rows as $i => $row) {
+			if (!is_array($row['meta'])) {
+				continue;
+			}
+			if (!empty($row['meta']['cards']) && is_array($row['meta']['cards'])) {
+				$rows[$i]['meta']['cards'] = \Aichat\Orders::replayCards($row['meta']['cards'], $conversation);
+			}
+			if ($hide && $row['role'] === 'assistant' && \Aichat\Handover::usesOrderTools($row['meta'])) {
+				$rows[$i]['content'] = $this->language->get('text_order_hidden');
+			}
+		}
+
+		return $rows;
 	}
 
 	/** Full client IP (stored on the conversation; rate keys use Guard::rateIp()). */
@@ -585,7 +624,7 @@ class ControllerExtensionModuleAichat extends Controller {
 		$page = $pageContext->resolve($url);
 		$orderAttemptsBefore = (int)$conversation['order_attempts'];
 
-		$history = $model->getMessages($conversationId, self::HISTORY_FOR_MODEL);
+		$history = $this->replayHistory($model->getMessages($conversationId, self::HISTORY_FOR_MODEL), $conversation);
 		$userMeta = array('page' => $this->pageMeta($page), 'url' => $url);
 		if ($imageIds) {
 			$userMeta['images'] = $imageIds;
@@ -1269,7 +1308,7 @@ class ControllerExtensionModuleAichat extends Controller {
 				'assistant' => $botName,
 				'staff'     => $this->language->get('transcript_staff'),
 				'system'    => '—',
-			), $filter) . "\n\n" . rtrim((string)$info['url'], '/') . "/\n";
+			), $filter, $this->orderDataHidden($ctx['conversation']) ? $this->language->get('text_order_hidden') : '') . "\n\n" . rtrim((string)$info['url'], '/') . "/\n";
 
 		$ok = \Aichat\Mailer::send($this->registry, $email, sprintf($this->language->get('transcript_subject'), $info['name']), $text, array('from' => $from, 'sender' => $info['name'], 'store_id' => $ctx['store_id'], 'settings' => $ctx['settings']));
 
@@ -1357,13 +1396,21 @@ class ControllerExtensionModuleAichat extends Controller {
 		$after = isset($this->request->get['after']) && is_numeric($this->request->get['after']) ? (int)$this->request->get['after'] : 0;
 		$messages = array();
 
+		$hideOrders = $this->orderDataHidden($conversation);
+
 		foreach ($this->model_extension_module_aichat->getMessagesAfter((int)$conversation['conversation_id'], $after) as $row) {
 			$item = array('message_id' => (int)$row['message_id'], 'role' => $row['role'], 'content' => (string)$row['content']);
 			if ($row['role'] === 'staff' && !empty($row['meta']['staff_name'])) {
 				$item['staff_name'] = (string)$row['meta']['staff_name'];
 			}
 			if (!empty($row['meta']['cards']) && is_array($row['meta']['cards'])) {
-				$item['cards'] = array_values($row['meta']['cards']);
+				$cards = array_values(\Aichat\Orders::replayCards($row['meta']['cards'], $conversation));
+				if ($cards) {
+					$item['cards'] = $cards;
+				}
+			}
+			if ($hideOrders && $row['role'] === 'assistant' && \Aichat\Handover::usesOrderTools($row['meta'])) {
+				$item['content'] = $this->language->get('text_order_hidden');
 			}
 			$messages[] = $item;
 		}

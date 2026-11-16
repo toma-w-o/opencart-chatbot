@@ -716,6 +716,34 @@ q("UPDATE oc_aichat_conversation SET mode = 'bot', waiting_since = NULL WHERE pu
 settings()->setSecret('tg_token', $hadToken);
 restoreSettings();
 
+echo "--- replay of order data after a guest's verification lapsed\n";
+resetRates();
+@unlink($mailFile);
+$tr = bootH($store0)['token'];
+probeT($store0, $tr, 'find_order', array('order_id' => '9001', 'phone' => '0888123456'));
+$b = bootH($store0, $tr);
+$hist = json_encode($b['history'], JSON_UNESCAPED_UNICODE);
+check('replay: fresh verification -> order data and order card shown', strpos($hist, 'Vitosha') !== false && strpos($hist, '"type":"order"') !== false, substr($hist, 0, 600));
+q("UPDATE oc_aichat_conversation SET verified_at = NOW() - INTERVAL 2 HOUR, verified_seen_at = NOW() - INTERVAL 2 HOUR WHERE public_id = '" . substr($tr, 0, 32) . "'");
+$b = bootH($store0, $tr);
+$hist = json_encode($b['history'], JSON_UNESCAPED_UNICODE);
+check('replay: lapsed -> boot hides the order text and the order/tracking cards', strpos($hist, 'Vitosha') === false && strpos($hist, '"type":"order"') === false && strpos($hist, '"type":"tracking"') === false && strpos($hist, 'order details are hidden') !== false, substr($hist, 0, 600));
+$p = json_decode(http('GET', ep($store0, 'poll'), null, array('X-Aichat-Token: ' . $tr)), true);
+$pj = json_encode($p, JSON_UNESCAPED_UNICODE);
+check('replay: lapsed -> poll hides them too', strpos($pj, 'Vitosha') === false && strpos($pj, '"type":"order"') === false, substr($pj, 0, 600));
+$r = postJ($store0, 'transcript', array('token' => $tr));
+$mail = mailText();
+check('replay: lapsed -> transcript mail without the order data', isset($r['ok']) && strpos($mail, 'Vitosha') === false && strpos($mail, 'order details are hidden') !== false, json_encode($r) . "\n" . substr($mail, 0, 800));
+$fakeLog = dirname($oc) . '/fake.log';
+$marker = 'replayprobe' . mt_rand(100000, 999999);
+sendM($store0, $tr, $marker);
+$lines = is_file($fakeLog) ? preg_grep('/' . $marker . '/', file($fakeLog)) : array();
+$first = $lines ? reset($lines) : '';
+check('replay: lapsed -> the model\'s history has no order data', $first !== '' && strpos($first, 'Vitosha') === false && strpos($first, 'order details are hidden') !== false, substr($first, 0, 300));
+q("UPDATE oc_aichat_conversation SET verified_at = NOW(), verified_seen_at = NOW() WHERE public_id = '" . substr($tr, 0, 32) . "'");
+$b = bootH($store0, $tr);
+check('replay: fresh again -> shown again', strpos(json_encode($b['history'], JSON_UNESCAPED_UNICODE), 'Vitosha') !== false);
+
 @unlink($png);
 restoreSettings();
 resetRates();
