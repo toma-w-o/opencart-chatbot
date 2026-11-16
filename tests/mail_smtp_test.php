@@ -76,8 +76,12 @@ function smtpLog($file) {
 }
 function lastMessage($file) {
 	$all = smtpLog($file);
-	$parts = explode('=== ', $all);
-	return (string)end($parts);
+	$pos = 0;
+	if (preg_match_all('/(?:^|\n)=== \d+ /', $all, $m, PREG_OFFSET_CAPTURE)) {
+		$last = end($m[0]);
+		$pos = $last[1];
+	}
+	return ltrim(substr($all, $pos), "\n=");
 }
 
 // OpenCart stores admin form input HTML-escaped: the password "p&ss<1>" is in the database as below
@@ -96,14 +100,14 @@ $settings = new \Aichat\Settings($registry);
 
 $r = \Aichat\Mailer::deliver($registry, 'owner@example.com', 'AI Chat: тест – заявка #1', "Здравейте,\nтест.\n", array('store_id' => 0, 'reply_to' => 'customer@example.com', 'sender' => 'Магазин · AI Chat'));
 $m = lastMessage($smtpLog);
-check('smtp store 0: delivered through Mail\\Smtp', $r['ok'] === true && $r['engine'] === 'smtp' && strpos($m, (string)$port0 . ' ') === 0, json_encode($r) . "\n" . $m);
+check('smtp store 0: delivered through Mail\\Smtp', $r['ok'] === true && $r['engine'] === 'smtp' && strpos($m, ' ' . (string)$port0 . ' ') === 0, json_encode($r) . "\n" . $m);
 check('smtp: envelope + headers as OpenCart builds them', strpos($m, 'RCPT TO: <owner@example.com>') !== false && strpos($m, 'MAIL FROM: <admin@example.com>') !== false && strpos($m, 'Subject: =?UTF-8?B?' . base64_encode('AI Chat: тест – заявка #1') . '?=') !== false && strpos($m, 'From: =?UTF-8?B?' . base64_encode('Магазин · AI Chat') . '?= <admin@example.com>') !== false && strpos($m, 'Reply-To: =?UTF-8?B?' . base64_encode('customer@example.com') . '?= <customer@example.com>') !== false, $m);
 check('smtp: AUTH with the entity-decoded password accepted', strpos($m, 'AUTH: mailer0') !== false && $r['ok']);
 check('smtp: UTF-8 body', strpos($m, "Здравейте,\nтест.") !== false);
 
 $r = \Aichat\Mailer::deliver($registry, 'owner@example.com', 'Store one mail', "x\n", array('store_id' => 1));
 $m = lastMessage($smtpLog);
-check('store 1 mail uses store 1\'s own SMTP settings while running under store 0', $r['ok'] && strpos($m, (string)$port1 . ' ') === 0 && strpos($m, 'AUTH: mailer1') !== false && strpos($m, 'MAIL FROM: <second@example.com>') !== false, $m);
+check('store 1 mail uses store 1\'s own SMTP settings while running under store 0', $r['ok'] && strpos($m, ' ' . (string)$port1 . ' ') === 0 && strpos($m, 'AUTH: mailer1') !== false && strpos($m, 'MAIL FROM: <second@example.com>') !== false, $m);
 
 cfg($db, 0, 'config_mail_smtp_port', '1');
 $log->lines = array();
@@ -143,7 +147,7 @@ $id = $requests->add(array('store_id' => 1, 'conversation_id' => 0, 'type' => 'o
 $res = $requests->mailStore(1, 'AI Chat: order change request #' . $id, "test\n", '', array(), $id);
 $row = $db->query("SELECT * FROM `" . DB_PREFIX . "aichat_request` WHERE `request_id` = '" . (int)$id . "'")->row;
 $m = lastMessage($smtpLog);
-check('request mail: s_notify_email of store 1, store 1 SMTP, mailed = 1', $res['ok'] && $res['to'] === 'orders@example.com' && (string)$row['mailed'] === '1' && strpos($m, (string)$port1 . ' ') === 0 && strpos($m, 'RCPT TO: <orders@example.com>') !== false, json_encode(array($res, $row)));
+check('request mail: s_notify_email of store 1, store 1 SMTP, mailed = 1', $res['ok'] && $res['to'] === 'orders@example.com' && (string)$row['mailed'] === '1' && strpos($m, ' ' . (string)$port1 . ' ') === 0 && strpos($m, 'RCPT TO: <orders@example.com>') !== false, json_encode(array($res, $row)));
 $settings->saveStore(1, array('s_notify_email' => ''));
 $res = $requests->mailStore(1, 'fallback', "test\n", '', array(), $id);
 check('request mail: empty s_notify_email -> the store\'s config_email', $res['ok'] && $res['to'] === 'second@example.com', json_encode($res));

@@ -9,7 +9,7 @@ const fs = require('fs');
 
 const WORK = process.argv[2];
 const ADMIN = 'http://127.0.0.1:8080/admin/index.php';
-const sql = (q) => execFileSync('mysql', ['-uroot', 'oc', '-N', '-B', '-e', q]).toString().trim();
+const sql = (q) => execFileSync('mysql', ['-uroot', 'oc', '--default-character-set=utf8mb4', '-N', '-B', '-r', '-e', q]).toString().trim();
 const setting = (sid, key, value) => {
   sql(`DELETE FROM oc_setting WHERE store_id=${sid} AND code='module_aichat' AND \`key\`='module_aichat_${key}'`);
   if (value !== null) sql(`INSERT INTO oc_setting SET store_id=${sid}, code='module_aichat', \`key\`='module_aichat_${key}', value='${value}', serialized=0`);
@@ -24,6 +24,15 @@ const check = (name, ok, detail) => { results.push((ok ? 'ok   ' : 'FAIL ') + na
 
 (async () => {
   setting(0, 's_avatar', 'ghost-removed-avatar');
+  // the smoke tests switch the per-minute limit off (0), which the admin form does not accept
+  setting(0, 's_max_msgs_minute', '6');
+  setting(1, 's_max_msgs_minute', '6');
+  // couriers as schema 4 seeds them (earlier smoke parts overwrite g_couriers with test hosts)
+  const seeds = execFileSync('php', ['-r', `spl_autoload_register(function ($c) { require '${WORK}/oc/system/library/' . str_replace('\\\\', '/', strtolower($c)) . '.php'; }); echo json_encode(\\Aichat\\Settings::defaultCouriers());`]).toString();
+  sql(`DELETE FROM oc_setting WHERE store_id=0 AND \`key\`='module_aichat_g_couriers'`);
+  sql(`INSERT INTO oc_setting SET store_id=0, code='module_aichat', \`key\`='module_aichat_g_couriers', value='${seeds.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}', serialized=1`);
+  let manifestFirst = 'default';
+  try { const m = JSON.parse(fs.readFileSync(WORK + '/oc/catalog/view/javascript/aichat/avatars/manifest.json', 'utf8')); const ids = m.map((x) => x.id); manifestFirst = ids.includes('default') ? 'default' : ids[0]; } catch (e) { /* no manifest: built-in default */ }
   fs.writeFileSync(WORK + '/mail_real.flag', '1');
   const browser = await chromium.launch();
   const page = await browser.newPage();
@@ -44,7 +53,7 @@ const check = (name, ok, detail) => { results.push((ok ? 'ok   ' : 'FAIL ') + na
       check(`field s[0][${f}] present`, (await page.$(`[name="s[0][${f}]"]`)) !== null);
     }
     const checkedAvatar = await page.$eval('input[name="s[0][s_avatar]"]:checked', (e) => e.value).catch(() => '');
-    check('avatar picker: unknown saved id shows the default', checkedAvatar === 'default', checkedAvatar);
+    check('avatar picker: unknown saved id shows the default (manifest default or its first avatar)', checkedAvatar === manifestFirst, checkedAvatar + ' vs ' + manifestFirst);
     const placeholder = await page.getAttribute('[name="s[0][s_store_name]"]', 'placeholder');
     check('store name field shows the automatic name', placeholder === 'Your Store', placeholder);
     const attentionInAppearance = await page.$eval('#tab-appearance [name="s[0][s_attention]"]', () => true).catch(() => false);
@@ -90,10 +99,11 @@ const check = (name, ok, detail) => { results.push((ok ? 'ok   ' : 'FAIL ') + na
     await page.click('#aichat-tabs a[href="#tab-contacts"]');
     await page.fill('[name="s[0][s_notify_email]"]', 'requests@example.com');
     await Promise.all([page.waitForNavigation(), page.click('button[form="form-aichat"]')]);
-    check('settings saved', (await page.content()).includes('alert-success'));
+    const saved = await page.content();
+    check('settings saved', saved.includes('alert-success'), (await page.$$eval('.text-danger, .alert-danger', (e) => e.map((x) => x.textContent.trim()).filter(Boolean))).join(' | '));
     const v = (k, sid = 0) => sql(`SELECT value FROM oc_setting WHERE store_id=${sid} AND \`key\`='module_aichat_${k}'`);
     check('saved: s_store_name, s_notify_email, s_attention, s_attention_interval', v('s_store_name') === 'Админ Магазин' && v('s_notify_email') === 'requests@example.com' && v('s_attention') === '0' && v('s_attention_interval') === '9', [v('s_store_name'), v('s_notify_email'), v('s_attention'), v('s_attention_interval')].join('|'));
-    check('saved: avatar fell back to default', v('s_avatar') === 'default', v('s_avatar'));
+    check('saved: avatar fell back to the default', v('s_avatar') === manifestFirst, v('s_avatar'));
     const couriers = JSON.parse(v('g_couriers') || '[]');
     const spSaved = couriers.find((c) => c.code === 'speedy');
     check('saved: courier pattern + aliases', spSaved && spSaved.pattern === '^6\\d{10}$' && JSON.stringify(spSaved.aliases) === JSON.stringify(['Спиди', 'Speedy BG']), JSON.stringify(spSaved));
