@@ -199,7 +199,7 @@ $rm = new ReflectionMethod('\Aichat\Installer', 'uninstall');
 $params = $rm->getParameters();
 check('I6: Installer::uninstall() keeps the data unless asked (default $dropData = false)', isset($params[1]) && $params[1]->getDefaultValue() === false && method_exists('\Aichat\Installer', 'purge'));
 check('A-19: one-character words are ignored, words and query capped', \Aichat\Tools::words('a 6 b ball') === array('ball') && \Aichat\Tools::len(\Aichat\Tools::words(str_repeat('x', 100))[0]) === \Aichat\Tools::MAX_WORD_LEN && count(\Aichat\Tools::words('one two three four five six seven eight')) === \Aichat\Tools::MAX_WORDS, json_encode(\Aichat\Tools::words('a 6 b ball')));
-check('schema 6 / version 1.2.0', \Aichat\Installer::SCHEMA === 6 && \Aichat\Installer::VERSION === '1.2.0');
+check('schema 7 / version 1.3.0 (round 6 GDPR)', \Aichat\Installer::SCHEMA === 7 && \Aichat\Installer::VERSION === '1.3.0');
 
 // ------------------------------------------------------------------ M1 / M2 / L5 over HTTP
 

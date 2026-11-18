@@ -7,9 +7,11 @@ namespace Aichat;
  */
 class Installer {
 	const EVENT_CODE = 'aichat';
-	const VERSION = '1.2.0';
+	const VERSION = '1.3.0';
 	/** Bump when a step is added to migrate(). */
-	const SCHEMA = 6;
+	const SCHEMA = 7;
+	/** OpenCart permission entry for personal data (GDPR page, transcripts, exports, deletes). */
+	const PD_PERMISSION = 'extension/module/aichat_pd';
 
 	/** Event list: trigger => action (all under code EVENT_CODE). */
 	public static function events() {
@@ -49,6 +51,11 @@ class Installer {
 
 		// 5: the Turnstile secret becomes write-only (secret file); idempotent
 		$settings->migrateTurnstileSecret();
+
+		if ($fromSchema < 7) {
+			// once: an owner who later takes the permission away from the group keeps it taken away
+			self::grantPdPermission($registry);
+		}
 
 		self::registerEvents($registry);
 		$settings->setInternal('g_schema', self::SCHEMA);
@@ -94,6 +101,56 @@ class Installer {
 		// 5: a guest's order verification lapses (phone confirmed at / last used at)
 		self::addColumn($db, 'aichat_conversation', 'verified_at', "DATETIME NULL DEFAULT NULL AFTER `verified_order_id`");
 		self::addColumn($db, 'aichat_conversation', 'verified_seen_at', "DATETIME NULL DEFAULT NULL AFTER `verified_at`");
+
+		// 7: GDPR - restriction of processing, privacy acceptance, end of the handover (Telegram topic deletion)
+		self::addColumn($db, 'aichat_conversation', 'restricted', "TINYINT(1) NOT NULL DEFAULT '0' AFTER `is_test`");
+		self::addColumn($db, 'aichat_conversation', 'privacy_accepted_at', "DATETIME NULL DEFAULT NULL AFTER `restricted`");
+		self::addColumn($db, 'aichat_conversation', 'tg_done_at', "DATETIME NULL DEFAULT NULL AFTER `waiting_since`");
+		self::addIndex($db, 'aichat_conversation', 'tg_done', '`tg_done_at`');
+		self::addIndex($db, 'aichat_conversation', 'date_added', '`date_added`');
+	}
+
+	/**
+	 * 7: adds PD_PERMISSION (access + modify) to the Administrator group
+	 * (by name; user_group_id 1 when no group has that name). Idempotent.
+	 */
+	public static function grantPdPermission($registry) {
+		$db = $registry->get('db');
+		$tables = $db->query("SHOW TABLES LIKE '" . $db->escape(DB_PREFIX . "user_group") . "'");
+
+		if (!$tables->num_rows) {
+			return false;
+		}
+
+		$group = $db->query("SELECT `user_group_id`, `permission` FROM `" . DB_PREFIX . "user_group` WHERE `name` = 'Administrator' ORDER BY `user_group_id` LIMIT 1")->row;
+
+		if (!$group) {
+			$group = $db->query("SELECT `user_group_id`, `permission` FROM `" . DB_PREFIX . "user_group` WHERE `user_group_id` = '1'")->row;
+		}
+
+		if (!$group) {
+			return false;
+		}
+
+		$permission = json_decode((string)$group['permission'], true);
+		$permission = is_array($permission) ? $permission : array();
+		$changed = false;
+
+		foreach (array('access', 'modify') as $type) {
+			if (!isset($permission[$type]) || !is_array($permission[$type])) {
+				$permission[$type] = array();
+			}
+			if (!in_array(self::PD_PERMISSION, $permission[$type], true)) {
+				$permission[$type][] = self::PD_PERMISSION;
+				$changed = true;
+			}
+		}
+
+		if ($changed) {
+			$db->query("UPDATE `" . DB_PREFIX . "user_group` SET `permission` = '" . $db->escape(json_encode($permission)) . "' WHERE `user_group_id` = '" . (int)$group['user_group_id'] . "'");
+		}
+
+		return true;
 	}
 
 	/**
@@ -140,7 +197,7 @@ class Installer {
 
 	/** Tables of the module (uninstall drops them). */
 	public static function tables() {
-		return array('aichat_conversation', 'aichat_message', 'aichat_usage', 'aichat_rate', 'aichat_upload', 'aichat_kb', 'aichat_request', 'aichat_search_miss', 'aichat_preview');
+		return array('aichat_conversation', 'aichat_message', 'aichat_usage', 'aichat_rate', 'aichat_upload', 'aichat_kb', 'aichat_request', 'aichat_search_miss', 'aichat_preview', 'aichat_dsr', 'aichat_access_log');
 	}
 
 	public static function addColumn($db, $table, $column, $definition) {
@@ -200,6 +257,7 @@ class Installer {
 			$db->query("DROP TABLE IF EXISTS `" . DB_PREFIX . $table . "`");
 		}
 		Uploads::deleteAllFiles();
+		Privacy::deleteAllExports();
 
 		$settings = new Settings($registry);
 		$settings->deleteAll();
@@ -272,7 +330,10 @@ class Installer {
 			`tg_topic_id` INT(11) NOT NULL DEFAULT '0',
 			`staff_name` VARCHAR(64) NOT NULL DEFAULT '',
 			`waiting_since` DATETIME NULL DEFAULT NULL,
+			`tg_done_at` DATETIME NULL DEFAULT NULL,
 			`is_test` TINYINT(1) NOT NULL DEFAULT '0',
+			`restricted` TINYINT(1) NOT NULL DEFAULT '0',
+			`privacy_accepted_at` DATETIME NULL DEFAULT NULL,
 			`date_added` DATETIME NOT NULL,
 			`date_modified` DATETIME NOT NULL,
 			PRIMARY KEY (`conversation_id`),
@@ -281,7 +342,9 @@ class Installer {
 			KEY `store_date` (`store_id`, `date_added`),
 			KEY `customer_id` (`customer_id`),
 			KEY `mode` (`mode`),
-			KEY `date_modified` (`date_modified`)
+			KEY `date_modified` (`date_modified`),
+			KEY `date_added` (`date_added`),
+			KEY `tg_done` (`tg_done_at`)
 		) " . $charset);
 
 		$db->query("CREATE TABLE IF NOT EXISTS `" . DB_PREFIX . "aichat_message` (
@@ -382,6 +445,33 @@ class Installer {
 			`data` MEDIUMTEXT NULL,
 			`date_added` DATETIME NOT NULL,
 			PRIMARY KEY (`preview_id`),
+			KEY `date_added` (`date_added`)
+		) " . $charset);
+
+		self::createPrivacyTables($db, $charset);
+	}
+
+	/** Round 6 tables (GDPR accountability); called by createTables(). */
+	private static function createPrivacyTables($db, $charset) {
+		$db->query("CREATE TABLE IF NOT EXISTS `" . DB_PREFIX . "aichat_dsr` (
+			`dsr_id` INT(11) NOT NULL AUTO_INCREMENT,
+			`user_id` INT(11) NOT NULL DEFAULT '0',
+			`action` VARCHAR(16) NOT NULL,
+			`query` MEDIUMTEXT NULL,
+			`result` MEDIUMTEXT NULL,
+			`date_added` DATETIME NOT NULL,
+			PRIMARY KEY (`dsr_id`),
+			KEY `date_added` (`date_added`)
+		) " . $charset);
+
+		$db->query("CREATE TABLE IF NOT EXISTS `" . DB_PREFIX . "aichat_access_log` (
+			`log_id` INT(11) NOT NULL AUTO_INCREMENT,
+			`user_id` INT(11) NOT NULL DEFAULT '0',
+			`conversation_id` INT(11) NOT NULL DEFAULT '0',
+			`action` VARCHAR(16) NOT NULL,
+			`date_added` DATETIME NOT NULL,
+			PRIMARY KEY (`log_id`),
+			KEY `conversation_id` (`conversation_id`),
 			KEY `date_added` (`date_added`)
 		) " . $charset);
 	}

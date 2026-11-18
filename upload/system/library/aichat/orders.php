@@ -502,8 +502,19 @@ class Orders {
 				$lines[] = $this->text($order[$k]);
 			}
 		}
-		if ($lines) {
-			$out['shipping_address'] = ($name !== '' ? $name . ', ' : '') . implode(', ', $lines);
+		$fullAddress = $lines ? ($name !== '' ? $name . ', ' : '') . implode(', ', $lines) : '';
+		// GDPR minimisation (s_min_model, default on): the model gets street name + city only; the
+		// customer still sees the full address on the order card, which PHP builds
+		$minimise = (int)$this->settings->getStore($this->storeId, 's_min_model') === 1;
+
+		if ($fullAddress !== '' && $minimise) {
+			$short = array_filter(array(Privacy::streetOnly(isset($order['shipping_address_1']) ? $this->text($order['shipping_address_1']) : ''), isset($order['shipping_city']) ? $this->text($order['shipping_city']) : ''), 'strlen');
+			if ($short) {
+				$out['shipping_address'] = implode(', ', $short);
+			}
+			$out['shipping_address_note'] = 'Shortened for privacy (street and city only). The customer sees the full delivery address on the order card under your reply; do not ask for it or try to complete it.';
+		} elseif ($fullAddress !== '') {
+			$out['shipping_address'] = $fullAddress;
 		}
 
 		// products
@@ -533,6 +544,9 @@ class Orders {
 		foreach ($this->history($orderId) as $h) {
 			$entry = array('date' => date('Y-m-d H:i', strtotime($h['date_added'])), 'status' => $this->text($h['status']));
 			$comment = $this->cleanComment($h['comment']);
+			if ($minimise && $comment !== '') {
+				$comment = Privacy::redactText($comment);
+			}
 			if ($comment !== '') {
 				$entry['comment'] = $comment;
 			}
@@ -556,7 +570,7 @@ class Orders {
 		$view = $this->viewOrderLink($order);
 
 		if ($withCards) {
-			$this->cards[] = $this->orderCard($order, $out, $view);
+			$this->cards[] = $this->orderCard($order, $out, $view, $fullAddress);
 			foreach ($tracking as $t) {
 				$this->cards[] = $this->trackingCard($t, null);
 			}
@@ -1121,7 +1135,7 @@ class Orders {
 
 	// ================================================================ cards
 
-	private function orderCard(array $order, array $details, $viewLink) {
+	private function orderCard(array $order, array $details, $viewLink, $address = '') {
 		$href = $viewLink;
 
 		if ($href === '' && $this->customerId() && (int)$order['customer_id'] === $this->customerId()) {
@@ -1138,6 +1152,10 @@ class Orders {
 			'status'   => $details['status'],
 			'total'    => $details['total'],
 		);
+
+		if ($address !== '') {
+			$card['address'] = $address; // shown to the verified customer only (replayCards hides lapsed ones)
+		}
 
 		if ($viewLink !== '') {
 			$card['button'] = $this->lang('card_view_order', 'View order');

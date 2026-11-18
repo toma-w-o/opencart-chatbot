@@ -1,4 +1,4 @@
-/*! AI Chat widget - dependency-free (rounds 1-3). */
+/*! AI Chat widget - dependency-free (rounds 1-6). */
 (function () {
   'use strict';
   if (window.__aichatLoaded) { return; }
@@ -36,7 +36,7 @@
     get: function (k) { try { return window.sessionStorage.getItem(k); } catch (e) { return null; } },
     set: function (k, v) { try { window.sessionStorage.setItem(k, v); } catch (e) { /* ignore */ } }
   };
-  var K_TOKEN = 'aichat_token', K_OPEN = 'aichat_open', K_DRAFT = 'aichat_draft', K_MUTE = 'aichat_mute', K_INVITE = 'aichat_invite';
+  var K_TOKEN = 'aichat_token', K_OPEN = 'aichat_open', K_DRAFT = 'aichat_draft', K_MUTE = 'aichat_mute', K_INVITE = 'aichat_invite', K_ACCEPT = 'aichat_privacy_ok';
 
   /* ---------- strings: [en, bg, el] ---------- */
   var S = {
@@ -82,7 +82,13 @@
     unmute: ['Turn sounds on', 'Включи звука', 'Ενεργοποίηση ήχων'],
     sent_ok: ['Sent. Check your inbox.', 'Изпратено. Проверете пощата си.', 'Εστάλη. Ελέγξτε τα εισερχόμενα.'],
     transcript_confirm: ['Send the conversation to %s?', 'Да изпратя ли разговора на %s?', 'Αποστολή της συνομιλίας στο %s;'],
-    dismiss: ['Dismiss', 'Затвори', 'Κλείσιμο']
+    dismiss: ['Dismiss', 'Затвори', 'Κλείσιμο'],
+    privacy: ['Privacy', 'Поверителност', 'Απόρρητο'],
+    privacy_link: ['Privacy policy', 'Политика за поверителност', 'Πολιτική απορρήτου'],
+    privacy_default: ['This chat is handled by an AI assistant.', 'Разговорът се обработва от AI асистент.', 'Τη συνομιλία χειρίζεται βοηθός AI.'],
+    accept: ['I agree', 'Приемам', 'Αποδέχομαι'],
+    accept_first: ['Please accept the privacy notice to start the chat.', 'Моля, приемете условията за поверителност, за да започнете.', 'Αποδεχτείτε την ειδοποίηση απορρήτου για να ξεκινήσετε.'],
+    masked: ['Please do not send card details, IBAN or personal ID numbers - we have masked them.', 'Моля, не изпращайте данни за карти, IBAN или ЕГН - маскирахме ги.', 'Μη στέλνετε στοιχεία καρτών, IBAN ή ΑΜΚΑ - τα αποκρύψαμε.']
   };
   var lang = (document.documentElement.lang || navigator.language || 'en').toLowerCase().slice(0, 2);
   if (lang === 'gr') { lang = 'el'; }
@@ -93,7 +99,8 @@
   var state = {
     boot: null, strings: {}, token: store.get(K_TOKEN) || '', open: false, busy: false,
     maxLen: 1000, mode: 'bot', avatar: 'default', botName: '', features: {}, appearance: {},
-    lastBoot: 0, lastId: 0, wait: null, sent: false, unread: false, staffName: '', pics: [], okReply: false, booting: false
+    lastBoot: 0, lastId: 0, wait: null, sent: false, unread: false, staffName: '', pics: [], okReply: false, booting: false,
+    privacy: null, accepted: false, privacyClosed: false, pending: null, gated: false, lastUserWrap: null
   };
   var el = {};
 
@@ -493,6 +500,8 @@
     buildEmoji();
     foot.appendChild(el.emojiPop);
 
+    el.priv = h('div', 'aichat-privacy', { role: 'note' }); el.priv.hidden = true;
+    foot.appendChild(el.priv);
     el.thumbErr = h('div', 'aichat-thumb-err', { role: 'alert' }); el.thumbErr.hidden = true;
     foot.appendChild(el.thumbErr);
     el.thumbs = h('div', 'aichat-thumbs'); el.thumbs.hidden = true;
@@ -625,7 +634,98 @@
   function uploading() { for (var i = 0; i < state.pics.length; i++) { if (state.pics[i].status === 'up') { return true; } } return false; }
   function readyPics() { return state.pics.filter(function (p) { return p.status === 'ok'; }); }
   function updateSend() {
-    el.sendBtn.disabled = state.busy || uploading() || (!el.input.value.trim() && !readyPics().length);
+    var locked = needAccept();
+    el.sendBtn.disabled = locked || state.busy || uploading() || (!el.input.value.trim() && !readyPics().length);
+    if (el.input.disabled !== locked) { el.input.disabled = locked; el.input.setAttribute('aria-disabled', locked ? 'true' : 'false'); }
+    el.root.classList.toggle('aichat-locked', locked);
+  }
+
+  /* ---------- privacy notice (round 6) ---------- */
+  // boot.privacy = {text, url, require_accept}; the notice shows above the input on the first open of a
+  // conversation, and from the "..." menu afterwards. With require_accept the input stays locked until "I agree".
+  function privacyOf(b) {
+    var p = b && b.privacy;
+    if (!p || typeof p !== 'object') { return null; }
+    var text = typeof p.text === 'string' ? p.text.trim() : '';
+    if (!text && !p.require_accept && !p.url) { return null; }
+    return { text: text || t('privacy_default'), url: p.url ? externalHref(String(p.url)) : null, require: !!p.require_accept, accepted: !!p.accepted };
+  }
+  var POLICY_RE = /(политика\S*\s+за\s+поверителност|поверителност|privacy\s+policy|privacy\s+notice|πολιτικ\S*\s+απορρήτου|απόρρητο\S*)/i;
+  function needAccept() { return !!(state.privacy && state.privacy.require && !state.accepted); }
+  function privacyNodes(box, withAccept, withClose) {
+    box.innerHTML = '';
+    var p = state.privacy;
+    var body = h('div', 'aichat-privacy-text');
+    // the policy named in the text becomes the link; otherwise the link is added after the text
+    var m = p.url ? POLICY_RE.exec(p.text) : null;
+    if (m) {
+      body.appendChild(document.createTextNode(p.text.slice(0, m.index)));
+      body.appendChild(txt('a', 'aichat-privacy-link', m[0], { href: p.url, target: '_blank', rel: 'noopener' }));
+      body.appendChild(document.createTextNode(p.text.slice(m.index + m[0].length)));
+    } else {
+      body.appendChild(document.createTextNode(p.text + ' '));
+      if (p.url) { body.appendChild(txt('a', 'aichat-privacy-link', t('privacy_link'), { href: p.url, target: '_blank', rel: 'noopener' })); }
+    }
+    box.appendChild(body);
+    if (withAccept) {
+      var ok = txt('button', 'aichat-mbtn aichat-privacy-accept', t('accept'), { type: 'button' });
+      ok.addEventListener('click', acceptPrivacy);
+      box.appendChild(ok);
+    } else if (withClose) {
+      var x = iconBtn('aichat-privacy-x', t('dismiss'), 'close');
+      x.addEventListener('click', function () { state.privacyClosed = true; el.priv.hidden = true; });
+      box.appendChild(x);
+    }
+  }
+  function showPrivacy(force) {
+    if (!state.privacy) { el.priv.hidden = true; updateSend(); return; }
+    var lock = needAccept();
+    var show = lock || force || (!state.privacyClosed && !state.sent && !el.list.querySelector('.aichat-msg--user'));
+    if (show) { privacyNodes(el.priv, lock, !lock); }
+    el.priv.hidden = !show;
+    updateSend();
+  }
+  function acceptPrivacy() {
+    state.accepted = true;
+    if (state.token) { store.set(K_ACCEPT, state.token); }
+    state.privacyClosed = true;
+    el.priv.hidden = true;
+    updateSend();
+    if (el.mSub && !el.mSub.hidden) { toggleMenu(false); }
+    var p = state.pending; state.pending = null;
+    if (p) { dispatch(p.text, p.pics, p.opts); } else { setTimeout(function () { el.input.focus({ preventScroll: true }); }, 30); }
+  }
+  function showNotice(n) {
+    var text = typeof n === 'string' ? n : (n && (n.message || n.text)) || t('masked');
+    var node = txt('div', 'aichat-sys aichat-sys--warn', text, { role: 'status' });
+    var after = state.lastUserWrap;
+    // the server stored and sent the masked text: show the visitor that version too
+    if (after && n && typeof n.text === 'string' && n.text) { var bb = after.querySelector('.aichat-bubble'); if (bb) { bb.textContent = n.text; } }
+    if (after && after.parentNode === el.list) { el.list.insertBefore(node, after.nextSibling); } else { appendToList(node); }
+    scrollDown(false);
+  }
+
+  /* ---------- consent gate (round 6, s_wait_consent) ---------- */
+  // The shop's cookie module calls: window.AICHAT_CONSENT = true; window.dispatchEvent(new Event('aichat:consent'));
+  var consent = { given: false, waiters: [] };
+  function consented() { return consent.given || window.AICHAT_CONSENT === true; }
+  function onConsent() {
+    consent.given = true;
+    var w = consent.waiters; consent.waiters = [];
+    w.forEach(function (fn) { fn(); });
+  }
+  window.addEventListener('aichat:consent', onConsent);
+  document.addEventListener('aichat:consent', onConsent);
+  function whenConsented(fn) {
+    if (consented()) { fn(); return; }
+    consent.waiters.push(fn);
+    if (!consent.timer) { // a cookie module may only set the flag: notice it without the event too
+      consent.timer = setInterval(function () { if (window.AICHAT_CONSENT === true) { clearInterval(consent.timer); consent.timer = null; onConsent(); } }, 1000);
+    }
+  }
+  function gateWanted(b) {
+    if (b) { return !!((b.privacy && b.privacy.wait_consent) || b.wait_consent); }
+    return !!(cfg.wait_consent || cfg.waitConsent || window.AICHAT_WAIT_CONSENT);
   }
 
   /* ---------- header menu ---------- */
@@ -634,7 +734,15 @@
     el.mTranscript = txt('button', 'aichat-mitem', t('transcript'), { type: 'button', role: 'menuitem' });
     el.mForget = txt('button', 'aichat-mitem', t('forget'), { type: 'button', role: 'menuitem' });
     el.mMute = h('button', 'aichat-mitem', { type: 'button', role: 'menuitem' });
+    el.mPrivacy = txt('button', 'aichat-mitem', t('privacy'), { type: 'button', role: 'menuitem' });
     el.mSub = h('div', 'aichat-msub'); el.mSub.hidden = true;
+    el.mPrivacy.addEventListener('click', function () {
+      if (!state.privacy) { return; }
+      el.mSub.innerHTML = ''; el.mSub.hidden = false;
+      var box = h('div', 'aichat-mmsg aichat-privacy-menu');
+      privacyNodes(box, needAccept(), false);
+      el.mSub.appendChild(box);
+    });
     el.mTranscript.addEventListener('click', function () {
       // the server decides the address (account e-mail or the e-mail of an order checked in this chat)
       el.mSub.innerHTML = ''; el.mSub.hidden = false;
@@ -673,10 +781,11 @@
     el.mMute.addEventListener('click', function () {
       store.set(K_MUTE, store.get(K_MUTE) === '1' ? '0' : '1'); syncMenu(); unlockAudio(); if (store.get(K_MUTE) !== '1') { ding(); }
     });
-    el.menu.appendChild(el.mTranscript); el.menu.appendChild(el.mForget); el.menu.appendChild(el.mMute); el.menu.appendChild(el.mSub);
+    el.menu.appendChild(el.mTranscript); el.menu.appendChild(el.mForget); el.menu.appendChild(el.mPrivacy); el.menu.appendChild(el.mMute); el.menu.appendChild(el.mSub);
     head.appendChild(el.menu);
   }
   function syncMenu() {
+    el.mPrivacy.hidden = !state.privacy;
     el.mMute.hidden = !(state.boot && state.boot.sound);
     el.mMute.textContent = store.get(K_MUTE) === '1' ? t('unmute') : t('mute');
   }
@@ -686,8 +795,8 @@
     if (open) { el.mSub.hidden = true; syncMenu(); toggleEmoji(false); }
   }
   function forgetLocal() {
-    store.del(K_TOKEN); store.del(K_DRAFT);
-    state.token = ''; state.sent = false; state.pics = []; renderThumbs(); el.input.value = ''; onInput();
+    store.del(K_TOKEN); store.del(K_DRAFT); store.del(K_ACCEPT);
+    state.token = ''; state.sent = false; state.accepted = false; state.privacyClosed = false; state.pending = null; state.pics = []; renderThumbs(); el.input.value = ''; onInput();
     stopPoll(); setMode('bot');
     doBoot(true);
   }
@@ -706,7 +815,7 @@
       setUnread(false); hideInvite();
       if (!el.list.children.length || Date.now() - state.lastBoot > 60000) { doBoot(true); }
       scrollDown(true);
-      setTimeout(function () { el.input.focus({ preventScroll: true }); }, 30);
+      if (!needAccept()) { setTimeout(function () { el.input.focus({ preventScroll: true }); }, 30); }
       attnStop();
     } else {
       toggleEmoji(false); toggleMenu(false);
@@ -1143,15 +1252,27 @@
       state.pics = []; renderThumbs();
     }
     toggleEmoji(false);
+    dispatch(text, pics, { images: pics.map(function (p) { return p.id; }) });
+  }
+  function dispatch(text, pics, opts) {
+    if (needAccept()) { state.pending = { text: text, pics: pics, opts: opts }; showPrivacy(true); addSys(t('accept_first')); return; }
     removeChips();
     state.sent = true; hideInvite();
-    addMsg('user', text, { images: pics.map(function (p) { return { src: p.url }; }) });
+    if (!state.privacy || !state.privacy.require) { el.priv.hidden = true; }
+    var sent = addMsg('user', text, { images: pics.map(function (p) { return { src: p.url }; }) });
+    state.lastUserWrap = sent.wrap;
     setBusy(true);
-    var opts = { images: pics.map(function (p) { return p.id; }) };
     if (!human()) { setAvatarState('thinking'); showTyping(); }
     state.okReply = false;
     sendMessage(text, opts).then(function (r) {
       if (r && r.challenge) { return runChallenge(text, opts, r.message); }
+      if (r && r.privacy) { // the server wants the notice accepted first: take the message back, resend after "I agree"
+        if (sent.wrap.parentNode) { sent.wrap.parentNode.removeChild(sent.wrap); }
+        state.accepted = false; store.del(K_ACCEPT);
+        if (state.privacy) { state.privacy.require = true; } else { state.privacy = { text: r.message || t('accept_first'), url: null, require: true }; }
+        state.pending = { text: text, pics: pics, opts: opts };
+        showPrivacy(true); syncMenu();
+      }
     }).then(function () {}, function () {}).then(function () {
       hideTyping(); setBusy(false);
       if (state.okReply) { setAvatarState('happy'); setTimeout(function () { if (!state.busy && state.avState === 'happy') { setAvatarState('idle'); } }, 1800); }
@@ -1163,6 +1284,7 @@
     var o = { token: state.token, message: text, url: location.href, stream: stream ? 1 : 0 };
     if (opts && opts.images && opts.images.length) { o.images = opts.images; }
     if (opts && opts.turnstile) { o.turnstile = opts.turnstile; }
+    if (state.accepted) { o.privacy_accepted = 1; }
     return JSON.stringify(o);
   }
   function gotReply(wrap, id) {
@@ -1185,6 +1307,7 @@
     addProducts(m.wrap, j.products, j.products_label);
     addCards(m.wrap, j.cards);
     if (j.mode) { setMode(j.mode, undefined, waitOf(j)); }
+    if (j.notice) { showNotice(j.notice); }
     gotReply(m.wrap, j.message_id);
   }
   function sendPlain(text, opts) {
@@ -1195,7 +1318,8 @@
     }).then(function (r) { return r.json(); }).then(function (j) {
       hideTyping();
       if (j && j.error && j.error.code === 'challenge') { return { challenge: true, message: j.error.message }; }
-      if (j && !j.error && typeof j.reply !== 'string' && j.mode) { setMode(j.mode, undefined, waitOf(j)); return; }
+      if (j && j.error && j.error.code === 'privacy_required') { return { privacy: true, message: j.error.message }; }
+      if (j && !j.error && typeof j.reply !== 'string' && j.mode) { if (j.notice) { showNotice(j.notice); } setMode(j.mode, undefined, waitOf(j)); return; }
       if (!j || j.error || typeof j.reply !== 'string') { showError(j && j.error && j.error.message); return; }
       renderReply(j);
     }).catch(function () { showError(); });
@@ -1215,10 +1339,11 @@
             hideTyping();
             if (j && j.error) {
               if (j.error.code === 'challenge') { return resolve({ challenge: true, message: j.error.message }); }
+              if (j.error.code === 'privacy_required') { return resolve({ privacy: true, message: j.error.message }); }
               return reject({ userMessage: j.error.message });
             }
             if (j && typeof j.reply === 'string') { renderReply(j); return resolve(); }
-            if (j && j.mode) { setMode(j.mode, undefined, waitOf(j)); return resolve(); }
+            if (j && j.mode) { if (j.notice) { showNotice(j.notice); } setMode(j.mode, undefined, waitOf(j)); return resolve(); }
             reject({ fallback: true });
           }, function () { reject({ fallback: true }); });
         }
@@ -1242,14 +1367,18 @@
             got = true; addProducts(ensureMsg().wrap, d.items, d.label);
           } else if (ev === 'cards') {
             got = true; addCards(ensureMsg().wrap, d.items);
+          } else if (ev === 'notice') {
+            showNotice(d);
           } else if (ev === 'done') {
             finished = true; paint();
             if (d.mode) { setMode(d.mode, undefined, waitOf(d)); }
+            if (d.notice) { showNotice(d.notice); }
             if (msg) { gotReply(msg.wrap, d.message_id); }
           } else if (ev === 'error') {
             finished = true; paint(); hideTyping();
             if (msg && !full && !msg.wrap.querySelector('.aichat-products,.aichat-cards')) { msg.wrap.parentNode.removeChild(msg.wrap); }
             if (d.code === 'challenge') { challenge = { challenge: true, message: d.message }; }
+            else if (d.code === 'privacy_required') { challenge = { privacy: true, message: d.message }; }
             else { addMsg('error', d.message || t('error')); }
           }
         }
@@ -1378,6 +1507,7 @@
     if (!hist.length) { addMsg('bot', (b.returning && b.welcome_back) || b.greeting || t('greeting')); if (botMode) { addChips(); } }
     else if (b.returning && b.welcome_back && botMode && !state.sent) { addMsg('bot', b.welcome_back); addChips(); }
     setMode(b.mode || 'bot', b.staff_name, waitOf(b));
+    showPrivacy(false);
     scrollDown(true);
   }
   function applyBoot(b) {
@@ -1389,6 +1519,11 @@
     state.features = b.features || {};
     state.appearance = b.appearance || {};
     if (b.token) { state.token = b.token; store.set(K_TOKEN, b.token); }
+    var prevReq = state.privacy && state.privacy.require;
+    state.privacy = privacyOf(b);
+    // accepted earlier for this conversation (server flag or this browser), or the visitor already wrote in it
+    state.accepted = !!(state.privacy && (state.privacy.accepted || (state.token && store.get(K_ACCEPT) === state.token) ||
+      (!prevReq && (b.history || []).some(function (m) { return m.role === 'user'; }))));
     var newAv = b.avatar || 'default';
     if (first) { state.avatar = newAv; build(); }
     else if (newAv !== state.avatar) { state.avatar = newAv; avs.forEach(function (n) { if (n.hasAttribute('data-loaded')) { n.removeAttribute('data-loaded'); n.innerHTML = renderAvatar().innerHTML; } setAvatarOf(n, newAv); }); }
@@ -1406,6 +1541,7 @@
     }
   }
   function doBoot(force) {
+    if (state.gated && !consented()) { return Promise.resolve(); }
     if (state.booting || (state.busy && !force)) { return Promise.resolve(); }
     state.booting = true;
     var bh = { 'Accept': 'application/json' };
@@ -1415,6 +1551,12 @@
       .then(function (b) {
         state.booting = false;
         if (!b || !b.enabled) { if (el.root) { el.root.hidden = true; } return; }
+        if (gateWanted(b) && !consented()) { // nothing is shown or stored before the shop's cookie consent
+          state.gated = true;
+          if (el.root) { el.root.hidden = true; }
+          whenConsented(function () { state.gated = false; loadCss(); doBoot(true); });
+          return;
+        }
         applyBoot(b);
       })
       .catch(function () { state.booting = false; /* stay silent; the token is kept for the next attempt */ });
@@ -1434,6 +1576,13 @@
   }
 
   function start() {
+    if (gateWanted(null) && !consented()) {
+      state.gated = true;
+      whenConsented(function () { state.gated = false; start(); });
+      return;
+    }
+    if (start.done) { return; }
+    start.done = true;
     loadCss(); doBoot();
     window.addEventListener('pageshow', function (e) { if (e.persisted) { refreshIfStale(true); pollKick(); } });
     document.addEventListener('visibilitychange', function () {

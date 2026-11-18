@@ -326,3 +326,18 @@ html.aichat-lock, html.aichat-lock body { overflow: hidden !important; }
 .aichat-root .aichat-iconbtn { color: var(--aichat-text) !important; }
 .aichat-root .aichat-thumb-x { color: #fff !important; }
 .aichat-root .aichat-btn-ghost, .aichat-root .aichat-mghost { color: var(--aichat-text) !important; }
+
+/* ---------- round 6: privacy notice, accept, masked-data notice ---------- */
+.aichat-root .aichat-privacy { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 8px; padding: 8px 10px; border-radius: 10px; background: var(--aichat-surface); border: 1px solid var(--aichat-border); font-size: 12.5px; line-height: 1.4; color: var(--aichat-muted); }
+.aichat-root .aichat-privacy[hidden] { display: none; }
+.aichat-root .aichat-privacy-text { flex: 1 1 auto; min-width: 0; text-align: left; }
+.aichat-root .aichat-privacy-link { color: var(--aichat-accent) !important; text-decoration: underline !important; }
+.aichat-root .aichat-privacy-accept { flex: 0 0 auto; align-self: center; padding: 6px 12px; font-size: 13px; }
+.aichat-root .aichat-privacy-x { flex: 0 0 22px; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--aichat-muted); }
+.aichat-root .aichat-privacy-x .aichat-ico, .aichat-root .aichat-privacy-x svg { width: 14px; height: 14px; }
+.aichat-root .aichat-privacy-x:hover { background: var(--aichat-bg); }
+.aichat-root .aichat-privacy-menu { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; color: var(--aichat-text); }
+.aichat-root .aichat-privacy-menu .aichat-privacy-accept { align-self: flex-start; }
+.aichat-root.aichat-locked .aichat-input { opacity: .55; cursor: not-allowed; }
+.aichat-root.aichat-locked .aichat-iconbtn { opacity: .5; pointer-events: none; }
+.aichat-root .aichat-sys--warn { background: #fff4e5; color: #8a4b00; border: 1px solid #f5d3a3; font-size: 12.5px; }

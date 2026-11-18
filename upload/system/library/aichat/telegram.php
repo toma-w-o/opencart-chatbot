@@ -81,6 +81,15 @@ class Telegram {
 		return is_array($result) && isset($result['message_thread_id']) ? (int)$result['message_thread_id'] : 0;
 	}
 
+	/** deleteForumTopic: the topic and all its messages (GDPR forget / erase / s_tg_delete_days). */
+	public function deleteTopic($chatId, $threadId) {
+		if ((string)$chatId === '' || (int)$threadId <= 0) {
+			return false;
+		}
+
+		return $this->call('deleteForumTopic', array('chat_id' => (string)$chatId, 'message_thread_id' => (int)$threadId)) !== null;
+	}
+
 	/** @return int message_id or 0 */
 	public function sendMessage($chatId, $threadId, $text, $keyboard = null) {
 		$params = array('chat_id' => $chatId, 'text' => self::cut($text, self::MAX_TEXT), 'disable_web_page_preview' => true);

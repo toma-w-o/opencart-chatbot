@@ -100,10 +100,10 @@
 				h += '<tr><td><span class="aichat-dot' + (it.ago < 60 ? ' is-on' : '') + '"></span></td>' +
 					'<td><span class="label label-default">' + esc(it.store) + '</span></td>' +
 					'<td class="aichat-cut">' + badge + page + '</td>' +
-					'<td class="aichat-cut aichat-muted">' + esc(it.last) + '</td>' +
+					'<td class="aichat-cut aichat-muted">' + (d.pd === false ? '<i class="fa fa-lock" title="' + esc(T.pd_hidden || '') + '"></i>' : esc(it.last)) + '</td>' +
 					'<td class="text-right">' + it.count + '</td>' +
 					'<td class="text-right aichat-muted">' + ago(it.ago) + '</td>' +
-					'<td class="text-right"><a class="btn btn-default btn-xs" href="' + esc(it.href) + '">' + esc(T.open) + '</a></td></tr>';
+					'<td class="text-right">' + (it.href ? '<a class="btn btn-default btn-xs" href="' + esc(it.href) + '">' + esc(T.open) + '</a>' : '') + '</td></tr>';
 			});
 			$l.html('<table class="table aichat-live-table"><tbody>' + h + '</tbody></table>');
 		}

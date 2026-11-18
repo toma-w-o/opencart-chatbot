@@ -152,7 +152,8 @@ class ModelExtensionModuleAichat extends Model {
 		$up = $this->hasColumn('message', 'rating') ? "(SELECT COUNT(*) FROM " . $this->t('message') . " r WHERE r.`conversation_id` = c.`conversation_id` AND r.`rating` = '1')" : "0";
 		$down = $this->hasColumn('message', 'rating') ? "(SELECT COUNT(*) FROM " . $this->t('message') . " r WHERE r.`conversation_id` = c.`conversation_id` AND r.`rating` = '-1')" : "0";
 
-		$sql = "SELECT c.`conversation_id`, c.`store_id`, c.`language_id`, c.`customer_id`, c.`mode`, c.`verified_order_id`, c.`message_count`, c.`cost`, c.`input_tokens`, c.`output_tokens`, c.`flagged`, c.`first_url`, c.`date_added`, c.`date_modified`, " . $test . " AS is_test, " . $up . " AS rating_up, " . $down . " AS rating_down,
+		$restricted = $this->hasColumn('conversation', 'restricted') ? "c.`restricted`" : "0";
+		$sql = "SELECT c.`conversation_id`, c.`store_id`, c.`language_id`, c.`customer_id`, c.`mode`, c.`verified_order_id`, c.`message_count`, c.`cost`, c.`input_tokens`, c.`output_tokens`, c.`flagged`, c.`first_url`, c.`date_added`, c.`date_modified`, " . $test . " AS is_test, " . $restricted . " AS restricted, " . $up . " AS rating_up, " . $down . " AS rating_down,
 			(SELECT m.`content` FROM " . $this->t('message') . " m WHERE m.`conversation_id` = c.`conversation_id` AND m.`role` = 'user' ORDER BY m.`message_id` LIMIT 1) AS first_message
 			FROM " . $this->t('conversation') . " c WHERE " . $this->listWhere($f) . " ORDER BY c.`conversation_id` DESC LIMIT " . (int)$start . "," . (int)$limit;
 
@@ -464,5 +465,95 @@ class ModelExtensionModuleAichat extends Model {
 
 	public function getConversationByPublicId($publicId) {
 		return $this->db->query("SELECT * FROM " . $this->t('conversation') . " WHERE `public_id` = '" . $this->db->escape($publicId) . "'")->row;
+	}
+
+	// ---- personal data (round 6) ----
+
+	/** aichat_dsr rows, newest first; query/result decoded; "case" from the query. */
+	public function getDsrLog($limit) {
+		if (!$this->hasTable('dsr')) {
+			return array();
+		}
+
+		$out = array();
+		foreach ($this->db->query("SELECT * FROM " . $this->t('dsr') . " ORDER BY `dsr_id` DESC LIMIT " . (int)$limit)->rows as $r) {
+			$q = isset($r['query']) ? json_decode((string)$r['query'], true) : null;
+			$res = isset($r['result']) ? json_decode((string)$r['result'], true) : null;
+			$q = is_array($q) ? $q : array();
+			$res = is_array($res) ? $res : array();
+			// the library may store the whole {query, result} pair in the query column
+			if (isset($q['query']) && is_array($q['query'])) {
+				if (!$res && isset($q['result']) && is_array($q['result'])) {
+					$res = $q['result'];
+				}
+				$q = $q['query'];
+			}
+			$out[] = array(
+				'dsr_id'     => (int)$r['dsr_id'],
+				'user_id'    => isset($r['user_id']) ? (int)$r['user_id'] : 0,
+				'action'     => isset($r['action']) ? (string)$r['action'] : '',
+				'query'      => $q,
+				'result'     => $res,
+				'case'       => isset($q['case']) && is_string($q['case']) ? $q['case'] : '',
+				'date_added' => isset($r['date_added']) ? (string)$r['date_added'] : ''
+			);
+		}
+
+		return $out;
+	}
+
+	public function getAccessLog($limit) {
+		if (!$this->hasTable('access_log')) {
+			return array();
+		}
+
+		return $this->db->query("SELECT `log_id`, `user_id`, `conversation_id`, `action`, `date_added` FROM " . $this->t('access_log') . " ORDER BY `log_id` DESC LIMIT " . (int)$limit)->rows;
+	}
+
+	/** user_id => "username (First Last)" */
+	public function getUserNames(array $ids) {
+		$ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+		if (!$ids) {
+			return array();
+		}
+
+		$out = array();
+		foreach ($this->db->query("SELECT `user_id`, `username`, `firstname`, `lastname` FROM `" . DB_PREFIX . "user` WHERE `user_id` IN (" . implode(',', $ids) . ")")->rows as $r) {
+			$full = trim($r['firstname'] . ' ' . $r['lastname']);
+			$out[(int)$r['user_id']] = $r['username'] . ($full !== '' ? ' (' . $full . ')' : '');
+		}
+
+		return $out;
+	}
+
+	/** Fallbacks while Aichat\Privacy is missing; the library writes these itself once present. */
+	public function writeAccessLog($userId, $conversationId, $action) {
+		if ($this->hasTable('access_log')) {
+			$this->db->query("INSERT INTO " . $this->t('access_log') . " SET `user_id` = '" . (int)$userId . "', `conversation_id` = '" . (int)$conversationId . "', `action` = '" . $this->db->escape($action) . "', `date_added` = NOW()");
+		}
+	}
+
+	public function writeDsr($userId, $action, array $query, array $result) {
+		if ($this->hasTable('dsr')) {
+			$this->db->query("INSERT INTO " . $this->t('dsr') . " SET `user_id` = '" . (int)$userId . "', `action` = '" . $this->db->escape($action) . "', `query` = '" . $this->db->escape(json_encode($query, JSON_UNESCAPED_UNICODE)) . "', `result` = '" . $this->db->escape(json_encode($result, JSON_UNESCAPED_UNICODE)) . "', `date_added` = NOW()");
+		}
+	}
+
+	/**
+	 * information_id of the store's privacy page in a language: title contains
+	 * "поверител" / "privacy" / "απόρρητο" (also without the accent), active and linked to the store.
+	 */
+	public function findPrivacyPage($storeId, $languageId) {
+		$like = array('поверител', 'privacy', 'απόρρητο', 'απορρητο', 'Απόρρητο', 'ΑΠΌΡΡΗΤΟ', 'ΑΠΟΡΡΗΤΟ');
+		$or = array();
+		foreach ($like as $w) {
+			$or[] = "id.`title` LIKE '%" . $this->like($w) . "%'";
+		}
+		$q = $this->db->query("SELECT i.`information_id` FROM `" . DB_PREFIX . "information` i
+			JOIN `" . DB_PREFIX . "information_description` id ON (id.`information_id` = i.`information_id` AND id.`language_id` = '" . (int)$languageId . "')
+			JOIN `" . DB_PREFIX . "information_to_store` i2s ON (i2s.`information_id` = i.`information_id` AND i2s.`store_id` = '" . (int)$storeId . "')
+			WHERE i.`status` = '1' AND (" . implode(' OR ', $or) . ") ORDER BY i.`sort_order`, i.`information_id` LIMIT 1");
+
+		return $q->num_rows ? (int)$q->row['information_id'] : 0;
 	}
 }

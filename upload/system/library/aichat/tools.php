@@ -1467,7 +1467,12 @@ class Tools {
 			return;
 		}
 
-		$q = function_exists('mb_strtolower') ? mb_strtolower(trim(preg_replace('/\s+/u', ' ', (string)$query)), 'UTF-8') : strtolower(trim((string)$query));
+		// GDPR: the log keeps no e-mails, phone numbers, addresses ... (visitors paste them into searches too)
+		$q = Privacy::redactText(trim(preg_replace('/\s+/u', ' ', (string)$query)));
+		if (trim(str_replace(Privacy::MASK, '', $q)) === '') {
+			return;
+		}
+		$q = function_exists('mb_strtolower') ? mb_strtolower($q, 'UTF-8') : strtolower($q);
 		$q = function_exists('mb_substr') ? mb_substr($q, 0, 190, 'UTF-8') : substr($q, 0, 190);
 
 		if ($q === '') {

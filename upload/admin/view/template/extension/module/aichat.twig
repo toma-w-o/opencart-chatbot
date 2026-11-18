@@ -28,7 +28,7 @@
       <button type="button" class="close" data-dismiss="alert">&times;</button>
     </div>
     {% endif %}
-    <form action="{{ action }}" method="post" enctype="multipart/form-data" id="form-aichat" class="form-horizontal" data-start-tab="{{ start_tab }}">
+    <form action="{{ action }}" method="post" enctype="multipart/form-data" id="form-aichat" class="form-horizontal" data-start-tab="{{ start_tab }}" data-privacy-link="{{ text_privacy_link|e('html_attr') }}">
     <div class="panel panel-default aichat-card">
       <div class="panel-body">
           <ul class="nav nav-tabs aichat-tabs" id="aichat-tabs">
@@ -42,6 +42,7 @@
             <li class="aichat-tab-store"><a href="#tab-orders" data-toggle="tab">{{ tab_orders }}</a></li>
             <li class="aichat-tab-store"><a href="#tab-behaviour" data-toggle="tab">{{ tab_behaviour }}</a></li>
             <li class="aichat-tab-store"><a href="#tab-limits" data-toggle="tab">{{ tab_limits }}</a></li>
+            <li class="aichat-tab-store"><a href="#tab-privacy" data-toggle="tab"><i class="fa fa-user-secret"></i> {{ tab_privacy }}</a></li>
           </ul>
 
           <div class="aichat-storebar" id="aichat-storebar" style="display:none">
@@ -136,19 +137,55 @@
                 </div>
                 <div class="col-sm-offset-2 col-sm-10"><div class="help-block">{{ text_budget_help }} {{ help_warn_email }}</div></div>
               </div>
-              <div class="form-group">
-                <label class="col-sm-2 control-label" for="input-g-ret-m">{{ entry_retention_months }}</label>
-                <div class="col-sm-4">
-                  <input type="text" name="g[g_retention_months]" value="{{ g.g_retention_months|e('html_attr') }}" id="input-g-ret-m" class="form-control" />
-                  {% if errors.g_retention_months %}<div class="text-danger">{{ errors.g_retention_months }}</div>{% endif %}
+              <fieldset id="aichat-retention">
+                <legend>{{ text_retention_title }}</legend>
+                <div class="help-block aichat-legend-help">{{ help_retention_intro }}</div>
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" for="input-g_retention_months">{{ entry_retention_months }}</label>
+                  <div class="col-sm-3">
+                    <div class="input-group"><input type="text" name="g[g_retention_months]" value="{{ g.g_retention_months|e('html_attr') }}" id="input-g_retention_months" class="form-control aichat-retention" data-warn="12" /><span class="input-group-addon">{{ text_unit_months }}</span></div>
+                    {% if errors.g_retention_months %}<div class="text-danger">{{ errors.g_retention_months }}</div>{% endif %}
+                    <div class="text-warning aichat-retention-warn" style="display:none"><i class="fa fa-exclamation-triangle"></i> {{ text_retention_long }}</div>
+                  </div>
+                  <div class="col-sm-6"><div class="help-block" style="padding-top:8px">{{ help_retention_conv }}</div></div>
                 </div>
-                <label class="col-sm-2 control-label" for="input-g-ret-d">{{ entry_image_retention_days }}</label>
-                <div class="col-sm-4">
-                  <input type="text" name="g[g_image_retention_days]" value="{{ g.g_image_retention_days|e('html_attr') }}" id="input-g-ret-d" class="form-control" />
-                  {% if errors.g_image_retention_days %}<div class="text-danger">{{ errors.g_image_retention_days }}</div>{% endif %}
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" for="input-g_ip_days">{{ entry_ip_days }}</label>
+                  <div class="col-sm-3">
+                    <div class="input-group"><input type="text" name="g[g_ip_days]" value="{{ g.g_ip_days|e('html_attr') }}" id="input-g_ip_days" class="form-control aichat-retention" data-warn="365" /><span class="input-group-addon">{{ text_unit_days }}</span></div>
+                    {% if errors.g_ip_days %}<div class="text-danger">{{ errors.g_ip_days }}</div>{% endif %}
+                    <div class="text-warning aichat-retention-warn" style="display:none"><i class="fa fa-exclamation-triangle"></i> {{ text_retention_long }}</div>
+                  </div>
+                  <div class="col-sm-6"><div class="help-block" style="padding-top:8px">{{ help_ip_days }}</div></div>
                 </div>
-                <div class="col-sm-offset-2 col-sm-10"><div class="help-block">{{ help_retention }}</div></div>
-              </div>
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" for="input-g_image_retention_days">{{ entry_image_retention_days }}</label>
+                  <div class="col-sm-3">
+                    <div class="input-group"><input type="text" name="g[g_image_retention_days]" value="{{ g.g_image_retention_days|e('html_attr') }}" id="input-g_image_retention_days" class="form-control aichat-retention" data-warn="365" /><span class="input-group-addon">{{ text_unit_days }}</span></div>
+                    {% if errors.g_image_retention_days %}<div class="text-danger">{{ errors.g_image_retention_days }}</div>{% endif %}
+                    <div class="text-warning aichat-retention-warn" style="display:none"><i class="fa fa-exclamation-triangle"></i> {{ text_retention_long }}</div>
+                  </div>
+                  <div class="col-sm-6"><div class="help-block" style="padding-top:8px">{{ help_image_days }}</div></div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" for="input-g_request_months">{{ entry_request_months }}</label>
+                  <div class="col-sm-3">
+                    <div class="input-group"><input type="text" name="g[g_request_months]" value="{{ g.g_request_months|e('html_attr') }}" id="input-g_request_months" class="form-control aichat-retention" data-warn="12" /><span class="input-group-addon">{{ text_unit_months }}</span></div>
+                    {% if errors.g_request_months %}<div class="text-danger">{{ errors.g_request_months }}</div>{% endif %}
+                    <div class="text-warning aichat-retention-warn" style="display:none"><i class="fa fa-exclamation-triangle"></i> {{ text_retention_long }}</div>
+                  </div>
+                  <div class="col-sm-6"><div class="help-block" style="padding-top:8px">{{ help_request_months }}</div></div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" for="input-g_miss_days">{{ entry_miss_days }}</label>
+                  <div class="col-sm-3">
+                    <div class="input-group"><input type="text" name="g[g_miss_days]" value="{{ g.g_miss_days|e('html_attr') }}" id="input-g_miss_days" class="form-control aichat-retention" data-warn="365" /><span class="input-group-addon">{{ text_unit_days }}</span></div>
+                    {% if errors.g_miss_days %}<div class="text-danger">{{ errors.g_miss_days }}</div>{% endif %}
+                    <div class="text-warning aichat-retention-warn" style="display:none"><i class="fa fa-exclamation-triangle"></i> {{ text_retention_long }}</div>
+                  </div>
+                  <div class="col-sm-6"><div class="help-block" style="padding-top:8px">{{ help_miss_days }}</div></div>
+                </div>
+              </fieldset>
               <fieldset>
                 <legend>{{ text_weekly_report }}</legend>
                 <div class="form-group">
@@ -846,6 +883,100 @@
                     <div class="help-block">{{ help_max_len }}</div>
                   </div>
                 </div>
+              </div>
+              {% endfor %}
+            </div>
+
+            <!-- ============ PRIVACY (per store, round 6) ============ -->
+            <div class="tab-pane" id="tab-privacy">
+              <p class="text-muted">{{ help_privacy_tab }} <a href="#tab-general" class="aichat-goto-tab">{{ text_retention_title }} &rarr;</a>{% if compliance_url %} &middot; <a href="{{ compliance_url }}">{{ menu_compliance }} &rarr;</a>{% endif %}</p>
+              {% for store in stores %}{% set sid = store.store_id %}{% set s = store.s %}{% set p = 's_' ~ sid ~ '_' %}
+              <div class="aichat-store" data-store="{{ sid }}">
+                <fieldset>
+                  <legend>{{ text_privacy_notice }}</legend>
+                  <div class="help-block aichat-legend-help">{{ help_privacy_notice }}</div>
+                  {% for language in languages %}{% set lid = language.language_id %}
+                  <div class="form-group aichat-privacy-row" data-store="{{ sid }}" data-lang="{{ lid }}">
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-ptxt-{{ lid }}">{{ entry_privacy_text }} <small>({{ language.code|e }})</small></label>
+                    <div class="col-sm-6">
+                      <textarea name="s[{{ sid }}][s_privacy_text][{{ lid }}]" id="input-s{{ sid }}-ptxt-{{ lid }}" rows="2" maxlength="400" placeholder="{{ s.privacy_text_auto[lid]|e('html_attr') }}" class="form-control aichat-privacy-text">{{ s.s_privacy_text[lid]|e }}</textarea>
+                      <div class="aichat-privacy-period text-warning" style="display:none"><i class="fa fa-exclamation-triangle"></i> {{ text_privacy_period }}</div>
+                      <input type="text" name="s[{{ sid }}][s_privacy_url][{{ lid }}]" value="{{ s.s_privacy_url[lid]|e('html_attr') }}" placeholder="{{ s.privacy_auto[lid] ? s.privacy_auto[lid] : 'https://' }}" class="form-control aichat-privacy-url" style="margin-top:6px" data-auto="{{ s.privacy_auto[lid]|e('html_attr') }}" />
+                      <div class="help-block">{% if s.privacy_auto[lid] %}{{ help_privacy_url_auto }} <a href="{{ s.privacy_auto[lid]|e('html_attr') }}" target="_blank" rel="noopener noreferrer">{{ s.privacy_auto[lid]|e }}</a>{% else %}{{ help_privacy_url_none }}{% endif %}</div>
+                    </div>
+                    <div class="col-sm-4">
+                      <div class="aichat-privacy-preview" aria-hidden="true">
+                        <div class="aichat-pp-label">{{ text_preview }}</div>
+                        <div class="aichat-pp-box"><span class="aichat-pp-text"></span> <button type="button" class="aichat-pp-accept" tabindex="-1">{{ text_accept_button }}</button></div>
+                        <div class="aichat-pp-input">{{ text_preview_input }}</div>
+                      </div>
+                    </div>
+                  </div>
+                  {% endfor %}
+                  {% if errors[p ~ 's_privacy_url'] %}<div class="text-danger aichat-err col-sm-offset-2">{{ errors[p ~ 's_privacy_url'] }}</div>{% endif %}
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-paccept">{{ entry_privacy_accept }}</label>
+                    <div class="col-sm-4">
+                      <select name="s[{{ sid }}][s_privacy_accept]" id="input-s{{ sid }}-paccept" class="form-control aichat-privacy-accept">
+                        <option value="0"{% if not s.s_privacy_accept %} selected="selected"{% endif %}>{{ text_privacy_accept_off }}</option>
+                        <option value="1"{% if s.s_privacy_accept %} selected="selected"{% endif %}>{{ text_privacy_accept_on }}</option>
+                      </select>
+                    </div>
+                    <div class="col-sm-6"><div class="help-block" style="padding-top:2px">{{ help_privacy_accept }}</div></div>
+                  </div>
+                </fieldset>
+                <fieldset>
+                  <legend>{{ text_consent_gate }}</legend>
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-wconsent">{{ entry_wait_consent }}</label>
+                    <div class="col-sm-4">
+                      <select name="s[{{ sid }}][s_wait_consent]" id="input-s{{ sid }}-wconsent" class="form-control">
+                        <option value="0"{% if not s.s_wait_consent %} selected="selected"{% endif %}>{{ text_wait_consent_off }}</option>
+                        <option value="1"{% if s.s_wait_consent %} selected="selected"{% endif %}>{{ text_wait_consent_on }}</option>
+                      </select>
+                    </div>
+                    <div class="col-sm-6"><div class="help-block" style="padding-top:2px">{{ help_wait_consent }}</div></div>
+                    <div class="col-sm-offset-2 col-sm-10">
+                      <pre class="aichat-snippet">window.AICHAT_CONSENT = true;
+window.dispatchEvent(new Event('aichat:consent'));</pre>
+                      <div class="help-block">{{ help_wait_consent_snippet }}</div>
+                    </div>
+                  </div>
+                </fieldset>
+                <fieldset>
+                  <legend>{{ text_minimisation }}</legend>
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-minm">{{ entry_min_model }}</label>
+                    <div class="col-sm-4">
+                      <select name="s[{{ sid }}][s_min_model]" id="input-s{{ sid }}-minm" class="form-control">
+                        <option value="1"{% if s.s_min_model %} selected="selected"{% endif %}>{{ text_min_model_on }}</option>
+                        <option value="0"{% if not s.s_min_model %} selected="selected"{% endif %}>{{ text_min_model_off }}</option>
+                      </select>
+                    </div>
+                    <div class="col-sm-6"><div class="help-block" style="padding-top:2px">{{ help_min_model }}</div></div>
+                  </div>
+                </fieldset>
+                <fieldset>
+                  <legend><i class="fa fa-paper-plane"></i> {{ text_tg_privacy }}</legend>
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-tgmask">{{ entry_tg_mask }}</label>
+                    <div class="col-sm-4">
+                      <select name="s[{{ sid }}][s_tg_mask]" id="input-s{{ sid }}-tgmask" class="form-control">
+                        <option value="0"{% if not s.s_tg_mask %} selected="selected"{% endif %}>{{ text_tg_mask_off }}</option>
+                        <option value="1"{% if s.s_tg_mask %} selected="selected"{% endif %}>{{ text_tg_mask_on }}</option>
+                      </select>
+                    </div>
+                    <div class="col-sm-6"><div class="help-block" style="padding-top:2px">{{ help_tg_mask }}</div></div>
+                  </div>
+                  <div class="form-group">
+                    <label class="col-sm-2 control-label" for="input-s{{ sid }}-tgdel">{{ entry_tg_delete_days }}</label>
+                    <div class="col-sm-4">
+                      <div class="input-group"><input type="text" name="s[{{ sid }}][s_tg_delete_days]" value="{{ s.s_tg_delete_days|e('html_attr') }}" id="input-s{{ sid }}-tgdel" class="form-control" data-default="7" /><span class="input-group-addon">{{ text_unit_days }}</span></div>
+                      {% if errors[p ~ 's_tg_delete_days'] %}<div class="text-danger aichat-err">{{ errors[p ~ 's_tg_delete_days'] }}</div>{% endif %}
+                    </div>
+                    <div class="col-sm-6"><div class="help-block" style="padding-top:2px">{{ help_tg_delete_days }}</div></div>
+                  </div>
+                </fieldset>
               </div>
               {% endfor %}
             </div>

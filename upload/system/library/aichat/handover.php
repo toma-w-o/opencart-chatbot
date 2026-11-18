@@ -77,14 +77,14 @@ class Handover {
 			return array('status' => 'unavailable', 'message' => 'Live chat with a person is not available right now. ' . $contactHint);
 		}
 
-		$reason = Telegram::cut(trim(preg_replace('/\s+/u', ' ', (string)$reason)), 300);
+		$reason = $this->mask($storeId, Telegram::cut(trim(preg_replace('/\s+/u', ' ', (string)$reason)), 300));
 		$own = array($storeInfo['host']);
 		$head = "🙋 " . $storeInfo['name'] . " · chat " . $cid . "\n"
 			. ($reason !== '' ? "Reason: " . LinkFilter::defang($reason, $own) . "\n" : '')
 			. "Page: " . LinkFilter::defang((string)$conversation['last_url'], $own) . "\n"
 			. "Language: " . $this->languageName((int)$conversation['language_id']) . "\n"
 			. "(Visitor text is unverified; links are made unclickable.)\n\n";
-		$transcript = LinkFilter::defang(self::transcript($this->db, $cid, self::TRANSCRIPT_LINES), $own);
+		$transcript = LinkFilter::defang($this->mask($storeId, self::transcript($this->db, $cid, self::TRANSCRIPT_LINES)), $own);
 
 		if ($this->translating()) {
 			$transcript = $this->translate($transcript, $this->staffLanguage(), $storeId, $cid);
@@ -97,7 +97,7 @@ class Handover {
 			return array('status' => 'unavailable', 'message' => 'Live chat with a person is not available right now. ' . $contactHint);
 		}
 
-		$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `mode` = 'waiting', `waiting_since` = NOW(), `tg_chat_id` = '" . $this->db->escape($chatId) . "', `tg_topic_id` = '" . (int)$topic . "', `staff_name` = '', `date_modified` = NOW() WHERE `conversation_id` = '" . $cid . "'");
+		$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `mode` = 'waiting', `waiting_since` = NOW(), `tg_chat_id` = '" . $this->db->escape($chatId) . "', `tg_topic_id` = '" . (int)$topic . "', `staff_name` = '', `tg_done_at` = NULL, `date_modified` = NOW() WHERE `conversation_id` = '" . $cid . "'");
 
 		$timeout = self::timeoutOf($store);
 		$strings = self::strings($this->db, (int)$conversation['language_id']);
@@ -109,6 +109,11 @@ class Handover {
 			'wait_text'       => $waitText,
 			'message'         => 'A colleague has been notified. Tell the customer exactly this (translated only if they write in another language): "' . $waitText . '" The chat window shows a countdown. Add nothing else and promise no other time.',
 		);
+	}
+
+	/** s_tg_mask (GDPR, off by default): address, phone, e-mail etc. of visitor text masked in the topic. */
+	public function mask($storeId, $text) {
+		return (int)$this->settings->getStore((int)$storeId, 's_tg_mask') === 1 ? Privacy::redactText((string)$text) : (string)$text;
 	}
 
 	public static function keyboard($conversationId) {
@@ -129,7 +134,7 @@ class Handover {
 			return false;
 		}
 
-		$text = trim((string)$text);
+		$text = $this->mask((int)$conversation['store_id'], trim((string)$text));
 
 		if ($text !== '') {
 			$out = $text;
@@ -173,7 +178,7 @@ class Handover {
 		}
 
 		$cid = (int)$conversation['conversation_id'];
-		$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `mode` = 'bot', `waiting_since` = NULL, `date_modified` = NOW() WHERE `conversation_id` = '" . $cid . "' AND `mode` = 'waiting'");
+		$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `mode` = 'bot', `waiting_since` = NULL, `tg_done_at` = NOW(), `date_modified` = NOW() WHERE `conversation_id` = '" . $cid . "' AND `mode` = 'waiting'");
 
 		if ($this->db->countAffected() < 1) {
 			return false;
@@ -412,7 +417,7 @@ class Handover {
 		$cid = (int)$conversation['conversation_id'];
 		// the owner finds staff ids for g_tg_staff_ids here
 		$this->log('chat ' . $cid . ' taken by Telegram user id ' . (int)$telegramUserId . ' (' . $name . ')');
-		$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `mode` = 'human', `waiting_since` = NULL, `staff_name` = '" . $this->db->escape(Telegram::cut($name, 64)) . "', `date_modified` = NOW() WHERE `conversation_id` = '" . $cid . "'");
+		$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `mode` = 'human', `waiting_since` = NULL, `tg_done_at` = NULL, `staff_name` = '" . $this->db->escape(Telegram::cut($name, 64)) . "', `date_modified` = NOW() WHERE `conversation_id` = '" . $cid . "'");
 
 		if ($conversation['mode'] !== 'human') {
 			$strings = self::strings($this->db, (int)$conversation['language_id']);
@@ -429,7 +434,7 @@ class Handover {
 	public function done(array $conversation, $name) {
 		$cid = (int)$conversation['conversation_id'];
 		$was = $conversation['mode'];
-		$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `mode` = 'bot', `waiting_since` = NULL, `date_modified` = NOW() WHERE `conversation_id` = '" . $cid . "'");
+		$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `mode` = 'bot', `waiting_since` = NULL, `tg_done_at` = NOW(), `date_modified` = NOW() WHERE `conversation_id` = '" . $cid . "'");
 
 		if ($was === 'waiting' || $was === 'human') {
 			$strings = self::strings($this->db, (int)$conversation['language_id']);

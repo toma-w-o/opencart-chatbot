@@ -54,6 +54,11 @@ class ModelExtensionModuleAichat extends Model {
 		$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `human_verified` = '" . (int)$state . "' WHERE `conversation_id` = '" . (int)$conversationId . "'");
 	}
 
+	/** Privacy notice accepted (s_privacy_accept); the first acceptance is kept. */
+	public function setPrivacyAccepted($conversationId) {
+		$this->db->query("UPDATE `" . DB_PREFIX . "aichat_conversation` SET `privacy_accepted_at` = NOW() WHERE `conversation_id` = '" . (int)$conversationId . "' AND `privacy_accepted_at` IS NULL");
+	}
+
 	public function addMessage($conversationId, $role, $content, $meta = null, $inputTokens = 0, $outputTokens = 0, $cost = 0) {
 		$json = $meta === null ? 'NULL' : "'" . $this->db->escape(json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | (defined('JSON_INVALID_UTF8_SUBSTITUTE') ? JSON_INVALID_UTF8_SUBSTITUTE : 0))) . "'";
 

@@ -38,8 +38,11 @@ class Settings {
 			'g_budget_month'         => 0.0,
 			'g_turnstile_site'       => '',
 			'g_turnstile_secret'     => '',
-			'g_retention_months'     => 12,
+			'g_retention_months'     => 6,    // GDPR (round 6): conversations kept 6 months by default
 			'g_image_retention_days' => 30,
+			'g_ip_days'              => 30,   // IP address + user agent of a conversation blanked after N days
+			'g_request_months'       => 12,   // requests (contacts, stock alerts, returns, order changes)
+			'g_miss_days'            => 90,   // "searched but not found" log
 			'g_warn_email'           => '',
 			'g_trust_cf_ip'          => 0,
 			'g_couriers'             => self::defaultCouriers(),
@@ -185,6 +188,14 @@ class Settings {
 			's_notify_email'          => '', // optional; empty = the store's config_email
 			's_attention'             => 1,  // launcher avatar plays a short grimace while the panel is closed
 			's_attention_interval'    => 5,  // seconds between grimaces
+			// round 6: GDPR
+			's_privacy_text'          => array(), // by language_id; empty = default text of the catalog language file
+			's_privacy_url'           => array(), // by language_id; empty = the store's privacy information page
+			's_privacy_accept'        => 0,       // "Accept" required before the first message
+			's_wait_consent'          => 0,       // widget waits for window.AICHAT_CONSENT / event aichat:consent
+			's_min_model'             => 1,       // order tools: no phone / e-mail / house number to the model
+			's_tg_mask'               => 0,       // mask address / phone / e-mail in Telegram topics
+			's_tg_delete_days'        => 7,       // delete Telegram topics N days after the handover ended (0 = never)
 		);
 	}
 

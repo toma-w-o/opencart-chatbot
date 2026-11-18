@@ -1,0 +1,156 @@
+{{ header }}{{ column_left }}
+<div id="content" class="aichat-admin">
+  <div class="page-header">
+    <div class="container-fluid">
+      <div class="pull-right"><a href="{{ compliance_url }}" class="btn btn-default"><i class="fa fa-balance-scale"></i> {{ menu_compliance }}</a></div>
+      <h1>{{ text_gdpr_title }}</h1>
+      <ul class="breadcrumb">
+        {% for breadcrumb in breadcrumbs %}
+        <li><a href="{{ breadcrumb.href }}">{{ breadcrumb.text }}</a></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="container-fluid" id="aichat-gdpr">
+    {{ subnav }}
+    {% if not lib_ready %}<div class="alert alert-warning"><i class="fa fa-info-circle"></i> {{ error_privacy_lib }}</div>{% endif %}
+    {% if not dsr_ready %}<div class="alert alert-warning"><i class="fa fa-info-circle"></i> {{ text_upgrade_pending }}</div>{% endif %}
+    <div class="alert alert-info aichat-small"><i class="fa fa-info-circle"></i> {{ help_gdpr_page }}</div>
+
+    <div class="panel panel-default aichat-card">
+      <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-search"></i> {{ text_dsr_search }}</h3></div>
+      <div class="panel-body">
+        <form method="get" action="index.php" id="aichat-dsr-form">
+          <input type="hidden" name="route" value="extension/module/aichat/privacy" />
+          <input type="hidden" name="user_token" value="{{ user_token }}" />
+          <input type="hidden" name="search" value="1" />
+          <div class="row">
+            <div class="col-sm-3"><label for="dsr-email">{{ text_email }}</label><input type="email" name="email" id="dsr-email" value="{{ form.email|e('html_attr') }}" class="form-control" autocomplete="off" /></div>
+            <div class="col-sm-3"><label for="dsr-phone">{{ text_phone }}</label><input type="text" name="phone" id="dsr-phone" value="{{ form.phone|e('html_attr') }}" class="form-control" autocomplete="off" /></div>
+            <div class="col-sm-2"><label for="dsr-order">{{ text_order_number }}</label><input type="text" name="order_id" id="dsr-order" value="{{ form.order_id }}" class="form-control" inputmode="numeric" autocomplete="off" /></div>
+            <div class="col-sm-2"><label for="dsr-customer">{{ text_customer_id }}</label><input type="text" name="customer_id" id="dsr-customer" value="{{ form.customer_id }}" class="form-control" inputmode="numeric" autocomplete="off" /></div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <div class="col-sm-3"><label for="dsr-received">{{ text_dsr_received }}</label><input type="date" name="received" id="dsr-received" value="{{ form.received }}" class="form-control" /></div>
+            <div class="col-sm-5"><label for="dsr-ref">{{ text_dsr_ref }}</label><input type="text" name="ref" id="dsr-ref" value="{{ form.ref|e('html_attr') }}" maxlength="120" placeholder="{{ text_dsr_ref_hint }}" class="form-control" /></div>
+            <div class="col-sm-4 text-right" style="padding-top:24px"><button type="submit" class="btn btn-primary"{% if not lib_ready %} disabled="disabled"{% endif %}><i class="fa fa-search"></i> {{ button_dsr_search }}</button></div>
+          </div>
+          <p class="help-block" style="margin:10px 0 0">{{ help_dsr_search }}</p>
+        </form>
+      </div>
+    </div>
+
+    {% if searched %}
+    <div class="panel panel-default aichat-card" id="aichat-dsr-results">
+      <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-list"></i> {{ text_dsr_results }}</h3></div>
+      <div class="panel-body">
+        {% if search_error %}
+        <div class="alert alert-warning">{{ search_error }}</div>
+        {% elseif not results.conversations and not results.requests %}
+        <p class="text-muted"><i class="fa fa-check"></i> {{ text_dsr_nothing }}</p>
+        {% else %}
+        <div class="aichat-gdpr-case aichat-small">
+          {{ text_dsr_case }}: <strong>{{ form.received }}</strong>{% if form.ref %} &middot; {{ form.ref|e }}{% endif %} &middot; {{ text_dsr_found|format(results.conversations|length, results.requests|length, results.uploads) }}
+        </div>
+        <form id="aichat-dsr-act" data-case="{{ form.case }}" data-received="{{ form.received }}" data-ref="{{ form.ref|e('html_attr') }}" data-email="{{ form.email|e('html_attr') }}" data-phone="{{ form.phone|e('html_attr') }}" data-order="{{ form.order_id }}" data-customer="{{ form.customer_id }}">
+        {% if results.conversations %}
+        <h4>{{ text_conversations }}</h4>
+        <div class="table-responsive">
+          <table class="table table-condensed aichat-gdpr-table">
+            <thead><tr><th style="width:30px"><input type="checkbox" class="aichat-all" data-group="c" checked="checked" aria-label="{{ text_select_all }}" /></th><th>#</th><th>{{ text_store }}</th><th>{{ text_date }}</th><th>{{ text_last_activity }}</th><th class="text-right">{{ text_messages }}</th><th>{{ text_status }}</th><th></th></tr></thead>
+            <tbody>
+            {% for c in results.conversations %}
+            <tr data-id="{{ c.id }}">
+              <td><input type="checkbox" name="conversation_ids[]" value="{{ c.id }}" class="aichat-pick" data-group="c" checked="checked" /></td>
+              <td><a href="{{ c.href }}" target="_blank" rel="noopener">{{ c.id }}</a></td>
+              <td><span class="label label-default">{{ c.store|e }}</span></td>
+              <td class="aichat-nowrap">{{ c.date }}</td>
+              <td class="aichat-nowrap">{{ c.modified }}</td>
+              <td class="text-right">{{ c.messages }}</td>
+              <td class="aichat-restrict-state">{% if c.restricted %}<span class="label label-warning"><i class="fa fa-pause-circle"></i> {{ text_restricted }}</span>{% else %}<span class="aichat-muted">{{ text_active }}</span>{% endif %}</td>
+              <td class="text-right">{% if can_erase %}<button type="button" class="btn btn-default btn-xs aichat-restrict" data-id="{{ c.id }}" data-on="{{ c.restricted ? 0 : 1 }}" title="{{ help_restricted }}"><i class="fa fa-pause-circle"></i> <span>{{ c.restricted ? button_unrestrict : button_restrict }}</span></button>{% endif %}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+        {% if results.requests %}
+        <h4>{{ text_requests }}</h4>
+        <div class="table-responsive">
+          <table class="table table-condensed aichat-gdpr-table">
+            <thead><tr><th style="width:30px"><input type="checkbox" class="aichat-all" data-group="r" checked="checked" aria-label="{{ text_select_all }}" /></th><th>#</th><th>{{ text_type }}</th><th>{{ text_store }}</th><th>{{ text_date }}</th></tr></thead>
+            <tbody>
+            {% for r in results.requests %}
+            <tr><td><input type="checkbox" name="request_ids[]" value="{{ r.id }}" class="aichat-pick" data-group="r" checked="checked" /></td><td>{{ r.id }}</td><td>{{ r.type|e }}</td><td><span class="label label-default">{{ r.store|e }}</span></td><td class="aichat-nowrap">{{ r.date }}</td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+        <div class="aichat-gdpr-actions">
+          <button type="button" class="btn btn-primary" id="aichat-dsr-export"><i class="fa fa-download"></i> {{ button_dsr_export }}</button>
+          <span class="text-muted aichat-small">{{ help_dsr_export }}</span>
+        </div>
+        {% if can_erase %}
+        <div class="aichat-gdpr-actions" style="border-top:1px solid #eee;padding-top:10px">
+          <label for="aichat-erase-word" class="aichat-small" style="margin:0">{{ text_erase_type|format(erase_word) }}</label>
+          <input type="text" id="aichat-erase-word" class="form-control input-sm" autocomplete="off" placeholder="{{ erase_word }}" />
+          <button type="button" class="btn btn-danger" id="aichat-dsr-erase"><i class="fa fa-trash"></i> {{ button_dsr_erase }}</button>
+          <span class="text-muted aichat-small">{{ help_dsr_erase }}</span>
+        </div>
+        {% else %}
+        <p class="text-muted aichat-small" style="margin-top:10px"><i class="fa fa-lock"></i> {{ text_erase_no_right }}</p>
+        {% endif %}
+        <div class="aichat-gdpr-msg" id="aichat-dsr-msg" role="status"></div>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="panel panel-default aichat-card">
+      <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-book"></i> {{ text_dsr_log }}</h3></div>
+      <div class="table-responsive">
+        <table class="table table-condensed table-hover aichat-gdpr-table" id="aichat-dsr-log">
+          <thead><tr><th>{{ text_date }}</th><th>{{ text_user }}</th><th>{{ text_action }}</th><th>{{ text_dsr_subject }}</th><th>{{ text_dsr_received }}</th><th>{{ text_dsr_due }}</th><th>{{ text_dsr_result }}</th></tr></thead>
+          <tbody>
+          {% for d in dsr %}
+          <tr>
+            <td class="aichat-nowrap">{{ d.date }}</td>
+            <td>{{ d.user|e }}</td>
+            <td><span class="label label-{{ d.raw == 'erase' ? 'danger' : (d.raw == 'export' ? 'primary' : 'default') }}">{{ d.action|e }}</span></td>
+            <td class="aichat-cut-wide">{{ d.query|e }}{% if d.ref %}<br><small class="aichat-muted">{{ d.ref|e }}</small>{% endif %}</td>
+            <td class="aichat-nowrap">{{ d.received }}</td>
+            <td class="aichat-nowrap">{% if d.due %}<span class="label label-{{ d.due.class }}">{{ d.due.text }}</span> <small class="aichat-muted">{{ d.due.due }}</small>{% endif %}</td>
+            <td class="aichat-muted aichat-small">{{ d.result|e }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7" class="text-center text-muted">{{ text_no_results }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="panel-footer aichat-small text-muted">{{ help_dsr_log }}</div>
+    </div>
+
+    <div class="panel panel-default aichat-card">
+      <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-eye"></i> {{ text_access_log }}</h3></div>
+      <div class="table-responsive">
+        <table class="table table-condensed table-hover aichat-gdpr-table" id="aichat-access-log">
+          <thead><tr><th>{{ text_date }}</th><th>{{ text_user }}</th><th>{{ text_action }}</th><th>{{ text_conversation }}</th></tr></thead>
+          <tbody>
+          {% for a in access %}
+          <tr><td class="aichat-nowrap">{{ a.date }}</td><td>{{ a.user|e }}</td><td>{{ a.action|e }}</td><td>{% if a.href %}<a href="{{ a.href }}">#{{ a.id }}</a>{% else %}#{{ a.id }} <small class="aichat-muted">{{ text_deleted }}</small>{% endif %}</td></tr>
+          {% else %}
+          <tr><td colspan="4" class="text-center text-muted">{{ text_no_results }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="panel-footer aichat-small text-muted">{{ help_access_log }}</div>
+    </div>
+  </div>
+</div>
+<script>window.AICHAT_GDPR = {token: {{ user_token|json_encode }}, urls: {{ urls|json_encode }}, i18n: {{ js_i18n|json_encode }}, word: {{ erase_word|json_encode }}, unrestrict: {{ button_unrestrict|json_encode }}, restrict: {{ button_restrict|json_encode }}, restricted: {{ text_restricted|json_encode }}, active: {{ text_active|json_encode }}};</script>
+{{ footer }}

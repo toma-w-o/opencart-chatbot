@@ -282,6 +282,58 @@
 			updatePreview(currentStore());
 		});
 
+		/* ---------- privacy (round 6): notice preview, retention warnings ---------- */
+		var POLICY = /(политика\S*\s+за\s+поверителност|поверителност|privacy\s+policy|privacy\s+notice|πολιτικ\S*\s+απορρήτου|απόρρητο\S*)/i;
+		function privacyPreview($row) {
+			var sid = $row.data('store');
+			var $txt = $row.find('.aichat-privacy-text');
+			var text = $.trim($txt.val()) || $.trim($txt.attr('placeholder') || '');
+			var url = $.trim($row.find('.aichat-privacy-url').val()) || $row.find('.aichat-privacy-url').data('auto') || '';
+			var accept = field(sid, 's_privacy_accept').val() === '1';
+			var $t = $row.find('.aichat-pp-text').empty();
+			var m = url ? POLICY.exec(text) : null;
+			if (m) {
+				$t.append(document.createTextNode(text.slice(0, m.index)));
+				$t.append($('<a target="_blank" rel="noopener noreferrer">').attr('href', url).text(m[0]));
+				$t.append(document.createTextNode(text.slice(m.index + m[0].length)));
+			} else {
+				$t.text(text + ' ');
+				if (url) {
+					$t.append($('<a target="_blank" rel="noopener noreferrer">').attr('href', url).text($form.data('privacy-link') || 'Privacy policy'));
+				}
+			}
+			$row.find('.aichat-pp-accept').toggle(accept);
+			$row.find('.aichat-pp-input').toggleClass('is-locked', accept);
+			// the notice names a period: warn when it differs from the conversation retention
+			var months = num($('#input-g_retention_months').val(), 0);
+			var pm = /(\d+)\s*(месец|месеца|month|μήν|μην)/i.exec(text);
+			$row.find('.aichat-privacy-period').toggle(!!(pm && months > 0 && num(pm[1], 0) !== months));
+			$row.find('.aichat-privacy-preview').css('--pp-accent', field(sid, 's_color_accent').val() || '#2563eb');
+		}
+		function allPrivacy() {
+			$('.aichat-privacy-row').each(function () {
+				privacyPreview($(this));
+			});
+		}
+		$form.on('input change', '.aichat-privacy-text, .aichat-privacy-url', function () {
+			privacyPreview($(this).closest('.aichat-privacy-row'));
+		});
+		$form.on('change', '.aichat-privacy-accept', allPrivacy);
+		function retentionWarn($i) {
+			var v = num($i.val(), 0), lim = num($i.data('warn'), 12);
+			$i.closest('.form-group').find('.aichat-retention-warn').toggle(v > lim || ($.trim($i.val()) === '0'));
+		}
+		$form.on('input change', '.aichat-retention', function () {
+			retentionWarn($(this));
+			if (this.id === 'input-g_retention_months') {
+				allPrivacy();
+			}
+		});
+		$('.aichat-retention').each(function () {
+			retentionWarn($(this));
+		});
+		allPrivacy();
+
 		// initial state: first store, tab from error / ?tab=
 		showStore($select.find('option:first').val());
 		var $err = $form.find('.aichat-err:first, .tab-pane .text-danger:first').first();

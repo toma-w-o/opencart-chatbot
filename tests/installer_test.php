@@ -170,4 +170,60 @@ $settings->saveGlobal(array('g_couriers' => \Aichat\Settings::defaultCouriers())
 $d4 = \Aichat\Settings::storeDefaults();
 check('round 4 store keys with defaults', $d4['s_store_name'] === '' && $d4['s_notify_email'] === '' && $d4['s_attention'] === 1 && $d4['s_attention_interval'] === 5);
 
+// ---- schema 6 state (1.2.0 install) -> 7: GDPR tables / columns, personal-data permission for the Administrator group
+$pd = \Aichat\Installer::PD_PERMISSION;
+$adminGroup = function () use ($db, $p) {
+	$row = $db->query("SELECT `user_group_id`, `permission` FROM `" . $p . "user_group` WHERE `name` = 'Administrator' ORDER BY `user_group_id` LIMIT 1")->row;
+	$perm = $row ? json_decode($row['permission'], true) : array();
+	return array($row ? (int)$row['user_group_id'] : 0, is_array($perm) ? $perm : array());
+};
+$setPd = function ($on) use ($db, $p, $adminGroup, $pd) {
+	list($id, $perm) = $adminGroup();
+	foreach (array('access', 'modify') as $type) {
+		$list = isset($perm[$type]) ? array_values(array_diff($perm[$type], array($pd))) : array();
+		if ($on) {
+			$list[] = $pd;
+		}
+		$perm[$type] = $list;
+	}
+	$db->query("UPDATE `" . $p . "user_group` SET `permission` = '" . $db->escape(json_encode($perm)) . "' WHERE `user_group_id` = '" . $id . "'");
+};
+foreach (array('aichat_dsr', 'aichat_access_log') as $t) {
+	$db->query("DROP TABLE IF EXISTS `" . $p . $t . "`");
+}
+foreach (array('tg_done', 'date_added') as $idx) {
+	if ($db->query("SHOW INDEX FROM `" . $p . "aichat_conversation` WHERE `Key_name` = '" . $idx . "'")->num_rows) {
+		$db->query("ALTER TABLE `" . $p . "aichat_conversation` DROP INDEX `" . $idx . "`");
+	}
+}
+foreach (array('restricted', 'privacy_accepted_at', 'tg_done_at') as $col) {
+	if ($db->query("SHOW COLUMNS FROM `" . $p . "aichat_conversation` LIKE '" . $col . "'")->num_rows) {
+		$db->query("ALTER TABLE `" . $p . "aichat_conversation` DROP `" . $col . "`");
+	}
+}
+$setPd(false);
+$db->query("UPDATE `" . $p . "setting` SET `value` = '6' WHERE `key` = 'module_aichat_g_schema'");
+$conversations = (int)$db->query("SELECT COUNT(*) AS n FROM `" . $p . "aichat_conversation`")->row['n'];
+check('upgrade from schema 6 runs', \Aichat\Installer::upgrade($registry) === true);
+$cols = array();
+foreach (array('restricted', 'privacy_accepted_at', 'tg_done_at') as $col) {
+	$cols[] = (bool)$db->query("SHOW COLUMNS FROM `" . $p . "aichat_conversation` LIKE '" . $col . "'")->num_rows;
+}
+check('schema 7: conversation columns restricted, privacy_accepted_at, tg_done_at + tables aichat_dsr, aichat_access_log', !in_array(false, $cols, true) && $db->query("SHOW TABLES LIKE '" . $p . "aichat_dsr'")->num_rows && $db->query("SHOW TABLES LIKE '" . $p . "aichat_access_log'")->num_rows && stripos($db->query("SHOW CREATE TABLE `" . $p . "aichat_dsr`")->row['Create Table'], 'utf8mb4') !== false);
+list(, $perm) = $adminGroup();
+check('schema 7: ' . $pd . ' granted to the Administrator group (access + modify)', in_array($pd, $perm['access'], true) && in_array($pd, $perm['modify'], true));
+$settings = new \Aichat\Settings($registry);
+check('g_schema 7, conversations kept, new global keys with defaults', (int)$settings->getGlobal('g_schema') === 7 && (int)$db->query("SELECT COUNT(*) AS n FROM `" . $p . "aichat_conversation`")->row['n'] === $conversations && (int)$settings->getGlobal('g_ip_days') === 30 && (int)$settings->getGlobal('g_request_months') === 12 && (int)$settings->getGlobal('g_miss_days') === 90);
+check('schema 7 upgrade again is a no-op', \Aichat\Installer::upgrade($registry) === false);
+$setPd(false);
+\Aichat\Installer::install($registry);
+list(, $perm) = $adminGroup();
+check('permission taken away by the owner is not granted again by install() over schema 7', !in_array($pd, isset($perm['access']) ? $perm['access'] : array(), true));
+$setPd(true);
+// from schema 1 (no g_schema row at all): every step, the permission once, no duplicate
+$db->query("DELETE FROM `" . $p . "setting` WHERE `key` = 'module_aichat_g_schema'");
+\Aichat\Installer::upgrade($registry);
+list(, $perm) = $adminGroup();
+check('upgrade from schema 1 / 0: permission entry not duplicated', count(array_keys($perm['access'], $pd)) === 1 && count(array_keys($perm['modify'], $pd)) === 1 && (int)(new \Aichat\Settings($registry))->getGlobal('g_schema') === 7);
+
 exit($fails ? 1 : 0);

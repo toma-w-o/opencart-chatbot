@@ -1,0 +1,104 @@
+{{ header }}{{ column_left }}
+<div id="content" class="aichat-admin aichat-compliance">
+  <div class="page-header">
+    <div class="container-fluid">
+      <div class="pull-right">
+        {% if gdpr_url %}<a href="{{ gdpr_url }}" class="btn btn-default"><i class="fa fa-user-secret"></i> {{ menu_privacy }}</a>{% endif %}
+        <a href="{{ settings_url }}" class="btn btn-default"><i class="fa fa-cog"></i> {{ tab_privacy }}</a>
+        <button type="button" class="btn btn-default" onclick="window.print()"><i class="fa fa-print"></i> {{ button_print }}</button>
+      </div>
+      <h1>{{ text_compliance_title }}</h1>
+      <ul class="breadcrumb">
+        {% for breadcrumb in breadcrumbs %}
+        <li><a href="{{ breadcrumb.href }}">{{ breadcrumb.text }}</a></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="container-fluid">
+    {{ subnav }}
+    <div class="alert alert-warning"><i class="fa fa-balance-scale"></i> {{ text_compliance_disclaimer }}</div>
+    <p class="text-muted aichat-small">{{ text_compliance_generated|format(generated) }}</p>
+
+    <div class="panel panel-default aichat-card">
+      <div class="panel-body">
+        <h3><i class="fa fa-share-alt"></i> {{ text_processors }}</h3>
+        <p class="help-block">{{ help_processors }}</p>
+        <div class="table-responsive">
+          <table class="table table-condensed" id="aichat-processors">
+            <thead><tr><th>{{ text_proc_who }}</th><th>{{ text_proc_role }}</th><th>{{ text_proc_gets }}</th><th>{{ text_proc_where }}</th><th>{{ text_proc_note }}</th></tr></thead>
+            <tbody>
+            {% for p in processors %}
+            <tr{% if not p.active %} class="aichat-proc-off"{% endif %}>
+              <td><strong>{{ p.name|e }}</strong>{% if not p.active %}<br><span class="label label-default">{{ text_proc_inactive }}</span>{% endif %}</td>
+              <td>{{ p.role|e }}</td><td>{{ p.gets|e }}</td><td>{{ p.where|e }}</td><td class="aichat-small">{{ p.note|e }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <h4>{{ text_per_store }}</h4>
+        <div class="table-responsive">
+          <table class="table table-condensed" id="aichat-store-privacy">
+            <thead><tr><th>{{ text_store }}</th><th>{{ text_chat }}</th><th>{{ entry_min_model }}</th><th>Telegram</th><th>{{ entry_tg_mask }}</th><th>{{ entry_tg_delete_days }}</th><th>{{ entry_feat_images }}</th><th>{{ entry_privacy_accept }}</th><th>{{ entry_wait_consent }}</th></tr></thead>
+            <tbody>
+            {% for s in stores_pd %}
+            <tr{% if not s.on %} class="aichat-proc-off"{% endif %}>
+              <td>{{ s.name|e }}</td>
+              <td>{{ s.on ? text_enabled : text_disabled }}</td>
+              <td>{% if s.min %}<span class="text-success">{{ text_yes }}</span>{% else %}<span class="text-warning">{{ text_no }}</span>{% endif %}</td>
+              <td>{{ s.tg ? text_yes : text_no }}</td>
+              <td>{% if not s.tg %}-{% elseif s.mask %}{{ text_yes }}{% else %}<span class="text-warning">{{ text_no }}</span>{% endif %}</td>
+              <td>{% if not s.tg %}-{% elseif s.tg_days %}{{ s.tg_days }}{% else %}<span class="text-warning">{{ text_forever }}</span>{% endif %}</td>
+              <td>{{ s.images ? text_yes : text_no }}</td>
+              <td>{{ s.accept ? text_yes : text_no }}</td>
+              <td>{{ s.gate ? text_yes : text_no }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if flags.tg_full %}<div class="alert alert-info aichat-small"><i class="fa fa-paper-plane"></i> {{ text_flag_tg_full }}</div>{% endif %}
+        {% if flags.min_off %}<div class="alert alert-warning aichat-small"><i class="fa fa-exclamation-triangle"></i> {{ text_flag_min_off }}</div>{% endif %}
+      </div>
+    </div>
+
+    <div class="panel panel-default aichat-card">
+      <div class="panel-body">
+        <h3><i class="fa fa-clock-o"></i> {{ text_retention_title }}</h3>
+        <div class="table-responsive">
+          <table class="table table-condensed" id="aichat-retention-table">
+            <thead><tr><th>{{ text_rt_what }}</th><th>{{ text_rt_how_long }}</th><th>{{ text_rt_how }}</th></tr></thead>
+            <tbody>
+            {% for r in retention %}
+            <tr><td>{{ r[0]|e }}</td><td class="aichat-nowrap">{% if r[3] %}<span class="text-warning"><i class="fa fa-exclamation-triangle"></i> {{ r[1]|e }}</span>{% else %}{{ r[1]|e }}{% endif %}</td><td class="aichat-small">{{ r[2]|e }}</td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel panel-default aichat-card">
+      <div class="panel-body">
+        <h3><i class="fa fa-file-text-o"></i> {{ text_ropa }}</h3>
+        <p class="help-block">{{ help_ropa }}</p>
+        <textarea class="form-control aichat-ropa" id="aichat-ropa" rows="18" readonly="readonly">{{ ropa|e }}</textarea>
+        <button type="button" class="btn btn-default btn-sm" id="aichat-ropa-copy" data-done="{{ text_copied|e('html_attr') }}" style="margin-top:8px"><i class="fa fa-clipboard"></i> <span>{{ button_copy }}</span></button>
+      </div>
+    </div>
+
+    <div class="panel panel-default aichat-card">
+      <div class="panel-body">
+        <h3><i class="fa fa-check-square-o"></i> {{ text_checklist }}</h3>
+        <p class="help-block">{{ help_checklist }}</p>
+        <ul class="aichat-checklist" id="aichat-checklist">
+          {% for c in checklist %}
+          <li><input type="checkbox" id="ck{{ loop.index }}" aria-label="{{ c.title|e('html_attr') }}" /><label for="ck{{ loop.index }}" style="font-weight:normal;margin:0"><strong>{{ c.title|e }}</strong>{{ c.text|e }}</label></li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+{{ footer }}

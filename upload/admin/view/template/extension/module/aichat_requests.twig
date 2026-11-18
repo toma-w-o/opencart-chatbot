@@ -13,6 +13,7 @@
   <div class="container-fluid">
     {{ subnav }}
     {% if not ready %}<div class="alert alert-warning"><i class="fa fa-info-circle"></i> {{ text_upgrade_pending }}</div>{% endif %}
+    {% if not can_pd %}<div class="alert alert-info"><i class="fa fa-lock"></i> {{ text_pd_limited_requests }}</div>{% endif %}
     <p class="text-muted">{{ text_requests_intro }}</p>
 
     <div class="panel panel-default aichat-card">
@@ -72,7 +73,7 @@
               <div class="row">
                 <div class="col-sm-6">
                   <dl class="aichat-dl">
-                    {% if r.conversation %}<dt>{{ text_conversation }}</dt><dd><a href="{{ r.conversation_url }}"><i class="fa fa-comments-o"></i> #{{ r.conversation }}</a></dd>{% elseif r.conversation_gone %}<dt>{{ text_conversation }}</dt><dd class="aichat-muted">{{ text_rq_conv_deleted }}</dd>{% endif %}
+                    {% if r.conversation %}<dt>{{ text_conversation }}</dt><dd>{% if r.conversation_url %}<a href="{{ r.conversation_url }}"><i class="fa fa-comments-o"></i> #{{ r.conversation }}</a>{% else %}#{{ r.conversation }}{% endif %}</dd>{% elseif r.conversation_gone %}<dt>{{ text_conversation }}</dt><dd class="aichat-muted">{{ text_rq_conv_deleted }}</dd>{% endif %}
                     {% if r.order_id %}<dt>{{ text_order }}</dt><dd><a href="{{ r.order_url }}" target="_blank" rel="noopener noreferrer"><i class="fa fa-shopping-cart"></i> #{{ r.order_id }}</a></dd>{% endif %}
                     {% if r.product_id %}<dt>{{ text_product }}</dt><dd><a href="{{ r.product_url }}" target="_blank" rel="noopener noreferrer">{{ r.product|e }}</a> <span class="aichat-muted">#{{ r.product_id }}</span></dd>{% endif %}
                     {% if r.email %}<dt>{{ entry_email }}</dt><dd>{{ r.email|e }}</dd>{% endif %}

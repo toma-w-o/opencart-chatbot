@@ -13,6 +13,8 @@
   <div class="container-fluid">
     {{ subnav }}
     {% if upgrade_pending %}<div class="alert alert-warning"><i class="fa fa-info-circle"></i> {{ text_upgrade_pending }}</div>{% endif %}
+    {% if pd_warning %}<div class="alert alert-danger"><i class="fa fa-lock"></i> {{ pd_warning }}</div>{% endif %}
+    {% if not can_pd %}<div class="alert alert-info"><i class="fa fa-lock"></i> {{ text_pd_limited }}</div>{% endif %}
     <div class="panel panel-default aichat-card">
       <div class="panel-body">
         <form method="get" action="index.php" class="aichat-filters">
@@ -29,7 +31,7 @@
               </select></div>
             <div class="col-sm-2"><label>{{ text_date_from }}</label><input type="date" name="filter_date_from" value="{{ filter.date_from }}" class="form-control" /></div>
             <div class="col-sm-2"><label>{{ text_date_to }}</label><input type="date" name="filter_date_to" value="{{ filter.date_to }}" class="form-control" /></div>
-            <div class="col-sm-3"><label>{{ text_search }}</label><input type="text" name="filter_q" value="{{ filter.q|e('html_attr') }}" placeholder="{{ text_search_hint }}" class="form-control" /></div>
+            <div class="col-sm-3"><label>{{ text_search }}</label><input type="text" name="filter_q" value="{{ can_pd ? filter.q|e('html_attr') : '' }}" placeholder="{{ can_pd ? text_search_hint : text_pd_no_search }}" class="form-control"{% if not can_pd %} disabled="disabled"{% endif %} /></div>
           </div>
           <div class="row" style="margin-top:10px">
             <div class="col-sm-2"><label>{{ text_has_order }}</label>
@@ -50,7 +52,7 @@
                 <option value="1"{% if filter.test == '1' %} selected="selected"{% endif %}>{{ text_test_only }}</option>
                 <option value="all"{% if filter.test == 'all' %} selected="selected"{% endif %}>{{ text_test_all }}</option></select></div>
             <div class="col-sm-4 text-right" style="padding-top:24px">
-              <a href="{{ export }}" class="btn btn-default" title="{{ help_export }}"><i class="fa fa-download"></i> {{ button_export }}</a>
+              {% if can_pd %}<a href="{{ export }}" class="btn btn-default" title="{{ help_export }}"><i class="fa fa-download"></i> {{ button_export }}</a>{% endif %}
               <a href="{{ clear }}" class="btn btn-default">{{ button_clear }}</a>
               <button type="submit" class="btn btn-primary"><i class="fa fa-search"></i> {{ button_filter }}</button>
             </div>
@@ -70,7 +72,7 @@
           {% if conversations %}
             {% for c in conversations %}
             <tr{% if c.flagged %} class="aichat-row-flag"{% endif %}>
-              <td><a href="{{ c.href }}">{{ c.id }}</a></td>
+              <td>{% if c.href %}<a href="{{ c.href }}">{{ c.id }}</a>{% else %}{{ c.id }}{% endif %}</td>
               <td class="aichat-nowrap">{{ c.date }}</td>
               <td><span class="label label-default">{{ c.store|e }}</span></td>
               <td>{{ c.language|e }}</td>
@@ -84,9 +86,10 @@
                 {% if c.down %}<span class="label label-danger"><i class="fa fa-thumbs-down"></i> {{ c.down }}</span> {% endif %}
                 {% if c.order %}<span class="label label-info">{{ text_order }} #{{ c.order }}</span> {% endif %}
                 {% if c.customer %}<span class="label label-default">{{ text_customer }} {{ c.customer }}</span> {% endif %}
+                {% if c.restricted %}<span class="label label-default" title="{{ help_restricted }}"><i class="fa fa-pause-circle"></i> {{ text_restricted }}</span> {% endif %}
                 {% if c.mode == 'waiting' %}<span class="label label-danger">{{ text_mode_waiting }}</span>{% elseif c.mode == 'human' %}<span class="label label-warning">{{ text_mode_human }}</span>{% endif %}
               </td>
-              <td class="text-right aichat-nowrap"><a href="{{ c.href }}" class="btn btn-default btn-xs">{{ text_open }}</a>
+              <td class="text-right aichat-nowrap">{% if c.href %}<a href="{{ c.href }}" class="btn btn-default btn-xs">{{ text_open }}</a>{% else %}<span class="aichat-muted" title="{{ text_pd_limited }}"><i class="fa fa-lock"></i></span>{% endif %}
                 {% if can_modify %}<button type="button" class="btn btn-danger btn-xs aichat-conv-delete" data-id="{{ c.id }}" title="{{ button_delete_conversation }}"><i class="fa fa-trash-o"></i></button>{% endif %}</td>
             </tr>
             {% endfor %}

@@ -3,6 +3,7 @@
   <div class="page-header">
     <div class="container-fluid">
       <div class="pull-right">
+        {% if can_restrict %}<button type="button" class="btn btn-default" id="aichat-restrict" data-id="{{ conv.id }}" data-on="{{ conv.restricted ? 0 : 1 }}" title="{{ help_restricted }}"><i class="fa fa-pause-circle"></i> {{ conv.restricted ? button_unrestrict : button_restrict }}</button>{% endif %}
         {% if can_modify %}<button type="button" class="btn btn-danger" id="aichat-delete-conv" data-id="{{ conv.id }}"><i class="fa fa-trash-o"></i> {{ button_delete_conversation }}</button>{% endif %}
         <a href="{{ back }}" class="btn btn-default"><i class="fa fa-reply"></i> {{ button_back }}</a></div>
       <h1>{{ text_transcript }} #{{ conv.id }}</h1>
@@ -18,7 +19,8 @@
     {% if upgrade_pending %}<div class="alert alert-warning"><i class="fa fa-info-circle"></i> {{ text_upgrade_pending }}</div>{% endif %}
     <div class="row">
       <div class="col-md-8">
-        <div class="alert alert-info aichat-small"><i class="fa fa-user-secret"></i> {{ text_privacy_access }}</div>
+        <div class="alert alert-info aichat-small"><i class="fa fa-user-secret"></i> {{ text_transcript_logged }}</div>
+        {% if conv.restricted %}<div class="alert alert-warning aichat-small"><i class="fa fa-pause-circle"></i> {{ help_restricted }}</div>{% endif %}
         <div class="aichat-thread">
           {% for m in messages %}
           <div class="aichat-msg aichat-msg-{{ m.role }}{% if m.flagged %} is-flagged{% endif %}" data-message="{{ m.id }}">
@@ -122,6 +124,7 @@
     </div>
   </div>
 </div>
+<script>window.AICHAT_RESTRICT = {url: {{ restrict_url|json_encode }}, token: {{ user_token|json_encode }}};</script>
 <script>window.AICHAT_FLAG = {url: {{ flag_url|json_encode }}, token: {{ user_token|json_encode }}, del: {{ delete_url|json_encode }}, confirm: {{ text_delete_confirm|json_encode }}};
 window.AICHAT_KB = {{ kb_config }};</script>
 {{ footer }}

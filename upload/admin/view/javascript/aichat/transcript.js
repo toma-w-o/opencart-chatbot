@@ -48,6 +48,25 @@
 			});
 		});
 
+		// restriction of processing (GDPR art. 18): the conversation stays, but is excluded from the model and statistics
+		$('#aichat-restrict').on('click', function () {
+			var R = window.AICHAT_RESTRICT, $b = $(this);
+			if (!R) {
+				return;
+			}
+			$b.prop('disabled', true);
+			$.post(R.url, {user_token: R.token, conversation_id: $b.data('id'), on: $b.data('on')}, null, 'json').done(function (r) {
+				if (r && r.success) {
+					window.location.reload();
+				} else {
+					window.alert((r && r.error) || 'Error');
+					$b.prop('disabled', false);
+				}
+			}).fail(function () {
+				$b.prop('disabled', false);
+			});
+		});
+
 		$(document).on('click', '.aichat-flag-btn', function () {
 			var $m = $(this).closest('[data-message]');
 			$m.find('.aichat-flag-form').toggle().find('textarea').focus();

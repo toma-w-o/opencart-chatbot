@@ -115,3 +115,13 @@ $_['error_transcript_unavailable'] = 'The conversation can be e-mailed only to t
 $_['text_transcript_unavailable'] = 'You can e-mail the conversation to yourself after logging in to your account, or after checking an order in this chat (it then goes to the order’s e-mail address).';
 $_['widget_transcript_confirm'] = 'Send the conversation to %s?';
 $_['text_order_hidden'] = 'The order details are hidden. Confirm the order number and phone again to see them.';
+
+// Round 6: GDPR
+$_['privacy_default']           = 'This chat is handled by an AI assistant and kept for up to %s months. More in our Privacy Policy.';
+$_['privacy_default_nolimit']   = 'This chat is handled by an AI assistant. More in our Privacy Policy.';
+$_['text_masked']               = 'Please do not send card details, IBAN or personal ID numbers – we masked them.';
+$_['text_masked_password']      = 'Please do not send passwords in the chat – we masked it.';
+$_['error_privacy_required']    = 'Please accept the privacy terms to start the conversation.';
+$_['widget_privacy_accept']     = 'I accept';
+$_['widget_privacy_link']       = 'Privacy Policy';
+$_['widget_privacy_title']      = 'Privacy';

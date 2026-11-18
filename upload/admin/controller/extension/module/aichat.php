@@ -69,6 +69,12 @@ class ControllerExtensionModuleAichat extends Controller {
 		$token = $this->session->data['user_token'];
 		$data['user_token'] = $token;
 		$data['subnav'] = $this->subnav($active, $token);
+		$data['can_pd'] = $this->canPd();
+		$data['pd_warning'] = '';
+		if ($active !== 'settings' && !empty($this->session->data['aichat_warning'])) {
+			$data['pd_warning'] = $this->session->data['aichat_warning'];
+			unset($this->session->data['aichat_warning']);
+		}
 		$this->load->model('extension/module/aichat');
 		$data['upgrade_pending'] = !$this->model_extension_module_aichat->hasTable('request') || !$this->model_extension_module_aichat->hasTable('kb');
 		$data['breadcrumbs'] = array(
@@ -86,8 +92,13 @@ class ControllerExtensionModuleAichat extends Controller {
 			'requests'      => array('extension/module/aichat/requests', 'fa-inbox', 'menu_requests'),
 			'kb'            => array('extension/module/aichat/kb', 'fa-book', 'menu_kb'),
 			'testchat'      => array('extension/module/aichat/testchat', 'fa-flask', 'menu_testchat'),
+			'privacy'       => array('extension/module/aichat/privacy', 'fa-user-secret', 'menu_privacy'),
+			'compliance'    => array('extension/module/aichat/compliance', 'fa-balance-scale', 'menu_compliance'),
 			'settings'      => array('extension/module/aichat', 'fa-cog', 'menu_settings')
 		);
+		if (!$this->canPd()) {
+			unset($items['privacy']);
+		}
 		$this->load->model('extension/module/aichat');
 		$open = $this->model_extension_module_aichat->countOpenRequests();
 		$html = '<ul class="nav nav-pills aichat-subnav">';
@@ -163,9 +174,14 @@ class ControllerExtensionModuleAichat extends Controller {
 				array('name' => $this->str('menu_requests'), 'href' => $this->url->link('extension/module/aichat/requests', $token, true), 'children' => array()),
 				array('name' => $this->str('menu_kb'), 'href' => $this->url->link('extension/module/aichat/kb', $token, true), 'children' => array()),
 				array('name' => $this->str('menu_testchat'), 'href' => $this->url->link('extension/module/aichat/testchat', $token, true), 'children' => array()),
+				array('name' => $this->str('menu_privacy'), 'href' => $this->url->link('extension/module/aichat/privacy', $token, true), 'children' => array()),
+				array('name' => $this->str('menu_compliance'), 'href' => $this->url->link('extension/module/aichat/compliance', $token, true), 'children' => array()),
 				array('name' => $this->str('menu_settings'), 'href' => $this->url->link('extension/module/aichat', $token, true), 'children' => array())
 			)
 		);
+		if (!$this->canPd()) {
+			array_splice($entry['children'], 5, 1);
+		}
 
 		// before "Extensions" when present, else at the end
 		$out = array();
@@ -216,6 +232,11 @@ class ControllerExtensionModuleAichat extends Controller {
 				'en' => 'Hi! Can I help you find something?',
 				'el' => 'Γειά σας! Μπορώ να σας βοηθήσω να βρείτε κάτι;'
 			),
+			'privacy' => array(
+				'bg' => 'Разговорът се обработва от AI асистент и се пази до 6 месеца. Повече в Политиката за поверителност.',
+				'en' => 'This chat is handled by an AI assistant and kept for up to 6 months. More in our Privacy Policy.',
+				'el' => 'Τη συνομιλία χειρίζεται βοηθός τεχνητής νοημοσύνης και τη διατηρούμε έως 6 μήνες. Περισσότερα στην Πολιτική Απορρήτου.'
+			),
 			'quick' => array(
 				'bg' => "Къде е моята поръчка?\nПрепоръчайте ми продукт\nКакви са начините за доставка?",
 				'en' => "Where is my order?\nRecommend a product\nWhat are the delivery options?",
@@ -254,6 +275,13 @@ class ControllerExtensionModuleAichat extends Controller {
 			's_attention_interval'   => 5,
 			's_store_name'           => '',
 			's_notify_email'         => '',
+			's_privacy_accept'       => 0,
+			's_wait_consent'         => 0,
+			's_min_model'            => 1,
+			's_tg_mask'              => 0,
+			's_tg_delete_days'       => 7,
+			's_privacy_text'         => array(),
+			's_privacy_url'          => array(),
 			's_proactive_text'       => array(),
 			's_greeting'             => array(),
 			's_welcome_back'         => array(),
@@ -278,6 +306,8 @@ class ControllerExtensionModuleAichat extends Controller {
 			$f['s_quick_replies'][$lid] = $text['quick'][$k];
 			$f['s_launcher_text'][$lid] = '';
 			$f['s_proactive_text'][$lid] = $text['proactive'][$k];
+			$f['s_privacy_text'][$lid] = ''; // empty = the storefront's default text with the current retention
+			$f['s_privacy_url'][$lid] = '';
 		}
 
 		return $f;
@@ -289,7 +319,7 @@ class ControllerExtensionModuleAichat extends Controller {
 			if (is_array($def)) {
 				$cur = isset($s[$key]) && is_array($s[$key]) ? $s[$key] : array();
 				foreach ($def as $lid => $v) {
-					if (!isset($cur[$lid]) || ($cur[$lid] === '' && $key !== 's_launcher_text')) {
+					if (!isset($cur[$lid]) || ($cur[$lid] === '' && !in_array($key, array('s_launcher_text', 's_privacy_url', 's_privacy_text'), true))) {
 						$cur[$lid] = $v;
 					}
 				}
@@ -475,8 +505,9 @@ class ControllerExtensionModuleAichat extends Controller {
 		$data['tg_test_url'] = $this->link('extension/module/aichat/tg_test');
 		$g['g_timezone'] = !empty($g['g_timezone']) ? $g['g_timezone'] : 'Europe/Sofia';
 		$g['g_model_light'] = isset($g['g_model_light']) && $g['g_model_light'] !== '' ? $g['g_model_light'] : $this->lightModel();
-		foreach (array('g_price_light_in' => 0.1, 'g_price_light_out' => 0.5, 'g_tg_chat_id' => '', 'g_tg_translate' => 0, 'g_tg_staff_lang' => 'bg', 'g_report_weekly' => 0, 'g_report_email' => '') as $k => $def) {
-			$g[$k] = isset($g[$k]) ? $g[$k] : $def;
+		foreach (array('g_price_light_in' => 0.1, 'g_price_light_out' => 0.5, 'g_tg_chat_id' => '', 'g_tg_translate' => 0, 'g_tg_staff_lang' => 'bg', 'g_report_weekly' => 0, 'g_report_email' => '',
+			'g_retention_months' => 6, 'g_ip_days' => 30, 'g_image_retention_days' => 30, 'g_request_months' => 12, 'g_miss_days' => 90) as $k => $def) {
+			$g[$k] = isset($g[$k]) && $g[$k] !== '' ? $g[$k] : $def;
 		}
 		$data['g'] = $g;
 		$canned = isset($g['g_tg_canned']) && is_array($g['g_tg_canned']) ? $g['g_tg_canned'] : array();
@@ -538,11 +569,26 @@ class ControllerExtensionModuleAichat extends Controller {
 			$s['s_avatar'] = $this->avatarChoice(isset($s['s_avatar']) ? $s['s_avatar'] : '', $data['avatars']);
 			$s['store_name_auto'] = class_exists('\\Aichat\\StoreInfo') ? \Aichat\StoreInfo::name($this->registry, $sid, null) : $store['name'];
 			$s['notify_auto'] = class_exists('\\Aichat\\StoreInfo') ? \Aichat\StoreInfo::get($this->registry, $sid, null)['email'] : '';
+			// privacy page found automatically per language (used when the URL field is empty)
+			$s['privacy_auto'] = array();
+			$base = rtrim($this->storeUrl($sid), '/') . '/';
+			$s['privacy_text_auto'] = array();
+			foreach ($languages as $language) {
+				$lid = (int)$language['language_id'];
+				if (class_exists('\\Aichat\\Privacy') && method_exists('\\Aichat\\Privacy', 'defaultPrivacyUrl')) {
+					$s['privacy_auto'][$lid] = (string)\Aichat\Privacy::defaultPrivacyUrl($this->registry, $sid, $lid);
+				} else {
+					$iid = $this->model_extension_module_aichat->findPrivacyPage($sid, $lid);
+					$s['privacy_auto'][$lid] = $iid ? $base . 'index.php?route=information/information&information_id=' . $iid : '';
+				}
+				$s['privacy_text_auto'][$lid] = $this->privacyDefaultText($language['code'], isset($g['g_retention_months']) ? (int)$g['g_retention_months'] : 6);
+			}
 			$data['stores'][] = array('store_id' => $sid, 'name' => $store['name'], 's' => $s);
 		}
 
 		$data['factory'] = $factory;
 		$data['test_mail_url'] = $this->link('extension/module/aichat/test_mail');
+		$data['compliance_url'] = $this->url->link('extension/module/aichat/compliance', 'user_token=' . $this->session->data['user_token'], true);
 		$data['start_tab'] = isset($this->request->get['tab']) ? preg_replace('/[^a-z]/', '', $this->request->get['tab']) : '';
 
 		$data['header'] = $this->load->controller('common/header');
@@ -550,6 +596,32 @@ class ControllerExtensionModuleAichat extends Controller {
 		$data['footer'] = $this->load->controller('common/footer');
 
 		$this->response->setOutput($this->load->view('extension/module/aichat', $data));
+	}
+
+	/** The storefront's default notice (catalog language file) for a language code, with the retention in months. */
+	private function privacyDefaultText($code, $months) {
+		$texts = array(
+			'privacy_default' => 'This chat is handled by an AI assistant and kept for up to %s months. More in our Privacy Policy.',
+			'privacy_default_nolimit' => 'This chat is handled by an AI assistant. More in our Privacy Policy.'
+		);
+		$k = $this->langKey($code);
+		if ($k === 'bg') {
+			$texts = array('privacy_default' => 'Разговорът се обработва от AI асистент и се пази до %s месеца. Повече в Политиката за поверителност.', 'privacy_default_nolimit' => 'Разговорът се обработва от AI асистент. Повече в Политиката за поверителност.');
+		} elseif ($k === 'el') {
+			$texts = array('privacy_default' => 'Η συνομιλία διεκπεραιώνεται από βοηθό τεχνητής νοημοσύνης και διατηρείται έως %s μήνες. Περισσότερα στην Πολιτική Απορρήτου.', 'privacy_default_nolimit' => 'Η συνομιλία διεκπεραιώνεται από βοηθό τεχνητής νοημοσύνης. Περισσότερα στην Πολιτική Απορρήτου.');
+		}
+		$file = DIR_CATALOG . 'language/' . preg_replace('/[^a-zA-Z0-9_-]/', '', (string)$code) . '/extension/module/aichat.php';
+		if (is_file($file)) {
+			$_ = array();
+			include $file;
+			foreach (array_keys($texts) as $key) {
+				if (isset($_[$key]) && is_string($_[$key]) && $_[$key] !== '') {
+					$texts[$key] = $_[$key];
+				}
+			}
+		}
+
+		return $months > 0 ? sprintf($texts['privacy_default'], $months) : $texts['privacy_default_nolimit'];
 	}
 
 	private function cleanGlobal($in) {
@@ -562,8 +634,11 @@ class ControllerExtensionModuleAichat extends Controller {
 		$out['g_warn_email'] = isset($in['g_warn_email']) ? trim($in['g_warn_email']) : '';
 		$out['g_turnstile_site'] = isset($in['g_turnstile_site']) ? trim($in['g_turnstile_site']) : '';
 		$out['g_trust_cf_ip'] = empty($in['g_trust_cf_ip']) ? 0 : 1;
-		$out['g_retention_months'] = (int)(isset($in['g_retention_months']) ? $in['g_retention_months'] : 12);
+		$out['g_retention_months'] = (int)(isset($in['g_retention_months']) ? $in['g_retention_months'] : 6);
 		$out['g_image_retention_days'] = (int)(isset($in['g_image_retention_days']) ? $in['g_image_retention_days'] : 30);
+		$out['g_ip_days'] = (int)(isset($in['g_ip_days']) ? $in['g_ip_days'] : 30);
+		$out['g_request_months'] = (int)(isset($in['g_request_months']) ? $in['g_request_months'] : 12);
+		$out['g_miss_days'] = (int)(isset($in['g_miss_days']) ? $in['g_miss_days'] : 90);
 		$light = isset($in['g_model_light']) ? trim($in['g_model_light']) : '';
 		$out['g_model_light'] = $light !== '' ? $light : $this->lightModel();
 		$tz = isset($in['g_timezone']) ? trim($in['g_timezone']) : '';
@@ -728,7 +803,32 @@ class ControllerExtensionModuleAichat extends Controller {
 		}
 		$out['s_custom_css'] = \Aichat\Settings::sanitizeCss(isset($in['s_custom_css']) ? (string)$in['s_custom_css'] : '');
 
+		// privacy (round 6)
+		foreach (array('s_privacy_accept', 's_wait_consent', 's_min_model', 's_tg_mask') as $k) {
+			$out[$k] = empty($in[$k]) ? 0 : 1;
+		}
+		$out['s_tg_delete_days'] = isset($in['s_tg_delete_days']) && ctype_digit(trim((string)$in['s_tg_delete_days'])) ? (int)trim($in['s_tg_delete_days']) : 7;
+		$out['s_privacy_text'] = array();
+		$out['s_privacy_url'] = array();
+		foreach ($languages as $language) {
+			$lid = (int)$language['language_id'];
+			$t = isset($in['s_privacy_text'][$lid]) ? trim(str_replace(array("\r", "\n"), array('', ' '), (string)$in['s_privacy_text'][$lid])) : '';
+			$out['s_privacy_text'][$lid] = function_exists('mb_substr') ? mb_substr($t, 0, 400) : substr($t, 0, 400);
+			$u = isset($in['s_privacy_url'][$lid]) ? trim((string)$in['s_privacy_url'][$lid]) : '';
+			$out['s_privacy_url'][$lid] = $this->privacyUrl($u);
+		}
+
 		return $out;
+	}
+
+	/** Owner-entered privacy policy address: http(s) URL or a path on the store ('' = invalid). */
+	private function privacyUrl($u) {
+		$u = trim((string)$u);
+		if (class_exists('\\Aichat\\Privacy') && method_exists('\\Aichat\\Privacy', 'cleanUrl')) {
+			return (string)\Aichat\Privacy::cleanUrl($u);
+		}
+
+		return (preg_match('#^https?://[^\s<>"\']+$#i', $u) || preg_match('#^/[^/\s<>"\'][^\s<>"\']*$#', $u)) ? $u : '';
 	}
 
 	private function num($v) {
@@ -773,6 +873,11 @@ class ControllerExtensionModuleAichat extends Controller {
 		}
 		if (!$this->isInt(isset($g['g_image_retention_days']) ? $g['g_image_retention_days'] : '', 0, 3650)) {
 			$this->error['g_image_retention_days'] = $this->language->get('error_integer');
+		}
+		foreach (array('g_ip_days' => array(0, 3650), 'g_request_months' => array(0, 120), 'g_miss_days' => array(0, 3650)) as $k => $r) {
+			if (!$this->isInt(isset($g[$k]) ? $g[$k] : '', $r[0], $r[1])) {
+				$this->error[$k] = sprintf($this->language->get('error_range'), $r[0], $r[1]);
+			}
 		}
 		if (trim(isset($g['g_model']) ? $g['g_model'] : '') === '') {
 			$this->error['g_model'] = $this->language->get('error_model');
@@ -849,7 +954,7 @@ class ControllerExtensionModuleAichat extends Controller {
 			$ranges = array('s_max_chats_day' => array(0, 100000), 's_max_msgs_chat' => array(1, 1000), 's_max_msgs_minute' => array(1, 100), 's_max_len' => array(50, 4000),
 				's_resume_days' => array(0, 365), 's_launcher_size' => array(32, 120), 's_launcher_avatar_size' => array(0, 100), 's_zindex' => array(1, 2147483647),
 				's_pos_desktop_x' => array(0, 1000), 's_pos_desktop_y' => array(0, 1000), 's_pos_mobile_x' => array(0, 500), 's_pos_mobile_y' => array(0, 1000),
-				's_handover_timeout' => array(10, 600), 's_proactive_delay' => array(0, 600), 's_attention_interval' => array(2, 600));
+				's_handover_timeout' => array(10, 600), 's_proactive_delay' => array(0, 600), 's_attention_interval' => array(2, 600), 's_tg_delete_days' => array(0, 365));
 			foreach ($ranges as $k => $r) {
 				if (!$this->isInt(isset($s[$k]) ? $s[$k] : '', $r[0], $r[1])) {
 					$this->error[$p . $k] = sprintf($this->language->get('error_range'), $r[0], $r[1]);
@@ -857,6 +962,11 @@ class ControllerExtensionModuleAichat extends Controller {
 			}
 			if (trim(isset($s['s_tg_chat_id']) ? $s['s_tg_chat_id'] : '') !== '' && !preg_match('/^-?\d{5,20}$/', trim($s['s_tg_chat_id']))) {
 				$this->error[$p . 's_tg_chat_id'] = $this->language->get('error_tg_chat');
+			}
+			foreach (isset($s['s_privacy_url']) && is_array($s['s_privacy_url']) ? $s['s_privacy_url'] : array() as $u) {
+				if (trim((string)$u) !== '' && $this->privacyUrl($u) === '') {
+					$this->error[$p . 's_privacy_url'] = $this->language->get('error_privacy_url');
+				}
 			}
 			if (trim(isset($s['s_notify_email']) ? $s['s_notify_email'] : '') !== '' && !filter_var(trim($s['s_notify_email']), FILTER_VALIDATE_EMAIL)) {
 				$this->error[$p . 's_notify_email'] = $this->language->get('error_email');
@@ -951,7 +1061,7 @@ class ControllerExtensionModuleAichat extends Controller {
 			'stores' => $data['stores'],
 			'i18n'   => array(
 				'chats' => $this->str('text_chats'), 'cost' => $this->str('text_cost'), 'nodata' => $this->str('text_no_data'), 'now' => $this->str('text_now'),
-				'ago_s' => $this->str('text_ago_s'), 'ago_m' => $this->str('text_ago_m'), 'live_empty' => $this->str('text_live_empty'), 'messages' => $this->str('text_messages'),
+				'ago_s' => $this->str('text_ago_s'), 'ago_m' => $this->str('text_ago_m'), 'live_empty' => $this->str('text_live_empty'), 'pd_hidden' => $this->str('text_pd_live_hidden'), 'messages' => $this->str('text_messages'),
 				'human' => $this->str('text_mode_human'), 'waiting' => $this->str('text_mode_waiting'), 'open' => $this->str('text_open'),
 				'budget_off' => $this->str('text_budget_off'), 'of' => $this->str('text_of'), 'updated' => $this->str('text_updated'),
 				'page_types' => array('product' => $this->str('page_product'), 'category' => $this->str('page_category'), 'information' => $this->str('page_information'), 'other' => $this->str('page_other')),
@@ -1076,7 +1186,7 @@ class ControllerExtensionModuleAichat extends Controller {
 		$outcome = $m->getHandoverOutcome($sid, $from);
 		$misses = array();
 		foreach ($m->getSearchMisses($sid, $from, 10) as $row) {
-			$misses[] = array('name' => (string)$row['query'], 'count' => (int)$row['hits']);
+			$misses[] = array('name' => $this->redact((string)$row['query']), 'count' => (int)$row['hits']);
 		}
 
 		$this->json(array(
@@ -1122,8 +1232,10 @@ class ControllerExtensionModuleAichat extends Controller {
 		}
 
 		$items = array();
+		$pd = $this->canPd();
 		foreach ($this->model_extension_module_aichat->getLive($this->storeFilter(), 5, 30) as $r) {
-			$last = trim(preg_replace('/\s+/u', ' ', (string)$r['last_message']));
+			// message text only with the personal-data permission, and then masked (round 6)
+			$last = $pd ? trim(preg_replace('/\s+/u', ' ', $this->redact((string)$r['last_message']))) : '';
 			$items[] = array(
 				'id'      => (int)$r['conversation_id'],
 				'store'   => isset($names[(int)$r['store_id']]) ? $names[(int)$r['store_id']] : (string)$r['store_id'],
@@ -1133,11 +1245,11 @@ class ControllerExtensionModuleAichat extends Controller {
 				'count'   => (int)$r['message_count'],
 				'ago'     => max(0, (int)$r['ago']),
 				'flagged' => (int)$r['flagged'],
-				'href'    => $this->link('extension/module/aichat/conversation', '&conversation_id=' . (int)$r['conversation_id'])
+				'href'    => $pd ? $this->link('extension/module/aichat/conversation', '&conversation_id=' . (int)$r['conversation_id']) : ''
 			);
 		}
 
-		$this->json(array('items' => $items, 'time' => date('H:i:s')));
+		$this->json(array('items' => $items, 'time' => date('H:i:s'), 'pd' => $pd));
 	}
 
 	// ------------------------------------------------------------------
@@ -1157,6 +1269,10 @@ class ControllerExtensionModuleAichat extends Controller {
 
 		$get = $this->request->get;
 		$f = $this->convFilter();
+		$pd = $this->canPd();
+		if (!$pd) {
+			$f['q'] = ''; // text search would reveal whether someone wrote a given phone or e-mail
+		}
 		$page = isset($get['page']) ? max(1, (int)$get['page']) : 1;
 		$limit = 20;
 
@@ -1172,7 +1288,8 @@ class ControllerExtensionModuleAichat extends Controller {
 
 		$data['conversations'] = array();
 		foreach ($m->getConversations($f, ($page - 1) * $limit, $limit) as $r) {
-			$first = trim(preg_replace('/\s+/u', ' ', (string)$r['first_message']));
+			// without the personal-data permission: masked preview, no transcript link
+			$first = trim(preg_replace('/\s+/u', ' ', $pd ? (string)$r['first_message'] : $this->redact((string)$r['first_message'])));
 			$data['conversations'][] = array(
 				'id'       => (int)$r['conversation_id'],
 				'date'     => $r['date_added'],
@@ -1188,7 +1305,8 @@ class ControllerExtensionModuleAichat extends Controller {
 				'up'       => (int)$r['rating_up'],
 				'down'     => (int)$r['rating_down'],
 				'first'    => function_exists('mb_substr') ? mb_substr($first, 0, 110) : substr($first, 0, 110),
-				'href'     => $this->url->link('extension/module/aichat/conversation', 'user_token=' . $this->session->data['user_token'] . '&conversation_id=' . (int)$r['conversation_id'], true)
+				'restricted' => !empty($r['restricted']),
+				'href'     => $pd ? $this->url->link('extension/module/aichat/conversation', 'user_token=' . $this->session->data['user_token'] . '&conversation_id=' . (int)$r['conversation_id'], true) : ''
 			);
 		}
 
@@ -1208,7 +1326,7 @@ class ControllerExtensionModuleAichat extends Controller {
 		);
 		$data['export'] = $this->url->link('extension/module/aichat/export', 'user_token=' . $this->session->data['user_token'] . $url, true);
 		$data['delete_url'] = $this->link('extension/module/aichat/delete');
-		$data['can_modify'] = $this->user->hasPermission('modify', 'extension/module/aichat');
+		$data['can_modify'] = $this->user->hasPermission('modify', 'extension/module/aichat') && $pd;
 		$data['stores'] = $stores;
 		$data['language_list'] = $langs;
 		$data['action'] = $this->url->link('extension/module/aichat/conversations', 'user_token=' . $this->session->data['user_token'], true);
@@ -1265,13 +1383,18 @@ class ControllerExtensionModuleAichat extends Controller {
 		$this->load->model('extension/module/aichat');
 		$m = $this->model_extension_module_aichat;
 		$id = isset($this->request->get['conversation_id']) ? (int)$this->request->get['conversation_id'] : 0;
-		$c = $m->getConversation($id);
 		$token = $this->session->data['user_token'];
 
+		if (!$this->canPd()) {
+			return $this->pdDenied(false);
+		}
+
+		$c = $m->getConversation($id);
 		if (!$c) {
 			$this->response->redirect($this->url->link('extension/module/aichat/conversations', 'user_token=' . $token, true));
 			return;
 		}
+		$this->accessLog($id, 'view');
 
 		$names = array();
 		foreach ($this->storeList() as $st) {
@@ -1383,6 +1506,7 @@ class ControllerExtensionModuleAichat extends Controller {
 			'note'     => (string)$c['note'],
 			'is_test'  => isset($c['is_test']) ? (int)$c['is_test'] : 0,
 			'staff'    => isset($c['staff_name']) ? (string)$c['staff_name'] : '',
+			'restricted' => !empty($c['restricted']),
 			'store_id' => (int)$c['store_id'],
 			'language_id' => (int)$c['language_id'],
 			'date'     => $c['date_added'],
@@ -1396,6 +1520,9 @@ class ControllerExtensionModuleAichat extends Controller {
 		$data['kb_config'] = $this->kbConfig(array('store_id' => (int)$c['store_id'], 'language_id' => (int)$c['language_id']));
 		$data['back'] = $this->url->link('extension/module/aichat/conversations', 'user_token=' . $token, true);
 		$data['can_modify'] = $this->user->hasPermission('modify', 'extension/module/aichat');
+		$data['can_restrict'] = $this->canPdModify() && $this->hasPrivacyLib('restrict');
+		$data['restrict_url'] = $this->link('extension/module/aichat/privacy_restrict');
+		$data['gdpr_url'] = $this->url->link('extension/module/aichat/privacy', 'user_token=' . $token, true);
 
 		$data['header'] = $this->load->controller('common/header');
 		$data['column_left'] = $this->load->controller('common/column_left');
@@ -1829,7 +1956,8 @@ class ControllerExtensionModuleAichat extends Controller {
 		if ($data['ready']) {
 			$total = $m->getRequestsTotal($f);
 			foreach ($m->getRequests($f, ($page - 1) * $limit, $limit) as $r) {
-				$data['rows'][] = $this->requestRow($r, $names, $m, $token);
+				$row = $this->requestRow($r, $names, $m, $token);
+				$data['rows'][] = $data['can_pd'] ? $row : $this->redactRequestRow($row);
 			}
 		}
 
@@ -1925,6 +2053,22 @@ class ControllerExtensionModuleAichat extends Controller {
 			'mail_error' => isset($d['mail_error']) ? (string)$d['mail_error'] : '',
 			'mail_to'  => isset($d['mail_to']) ? (string)$d['mail_to'] : ''
 		);
+	}
+
+	/** Requests list without the personal-data permission: contact data masked, no photos, no transcript link. */
+	private function redactRequestRow(array $row) {
+		$row['email'] = $row['email'] !== '' ? $this->redact($row['email']) : '';
+		$row['phone'] = $row['phone'] !== '' ? $this->redact($row['phone']) : '';
+		$row['summary'] = $this->redact($row['summary']);
+		$row['mail_to'] = $row['mail_to'] !== '' ? $this->redact($row['mail_to']) : '';
+		foreach ($row['fields'] as $i => $f) {
+			$row['fields'][$i]['value'] = $this->redact($f['value']);
+			$row['fields'][$i]['url'] = '';
+		}
+		$row['images'] = array();
+		$row['conversation_url'] = '';
+
+		return $row;
 	}
 
 	/** POST request_id, status new|done */
@@ -2147,7 +2291,7 @@ class ControllerExtensionModuleAichat extends Controller {
 
 	/** CSV of the filtered list. UTF-8 with BOM and ";" (Excel in a Bulgarian locale), spreadsheet formulas neutralised. */
 	public function export() {
-		if (!$this->user->hasPermission('access', 'extension/module/aichat')) {
+		if (!$this->user->hasPermission('access', 'extension/module/aichat') || !$this->canPd()) {
 			$this->response->redirect($this->url->link('error/permission', 'user_token=' . $this->session->data['user_token'], true));
 			return;
 		}
@@ -2218,8 +2362,17 @@ class ControllerExtensionModuleAichat extends Controller {
 		$post = $this->post();
 		$id = isset($post['conversation_id']) ? (int)$post['conversation_id'] : 0;
 
+		if (!$this->canPd()) {
+			return $this->pdDenied();
+		}
 		if (!$id || !$m->getConversation($id)) {
 			return $this->json(array('success' => false, 'error' => 'not found'));
+		}
+		$this->accessLog($id, 'delete');
+		if ($this->hasPrivacyLib('erase')) {
+			// also anonymises order requests and closes the Telegram topic (round 6)
+			$this->privacyCall('erase', array('registry' => null, 'conversationIds' => array($id), 'requestIds' => array()));
+			return $this->json(array('success' => true, 'redirect' => $this->link('extension/module/aichat/conversations')));
 		}
 
 		if ($m->getUploadIds($id)) {
@@ -2240,7 +2393,8 @@ class ControllerExtensionModuleAichat extends Controller {
 	 * request) and read from DIR_STORAGE/aichat/uploads; needs the module's access permission.
 	 */
 	public function image() {
-		if (!$this->user->hasPermission('access', 'extension/module/aichat') || !class_exists('\Aichat\Uploads')) {
+		if (!$this->user->hasPermission('access', 'extension/module/aichat') || !$this->canPd() || !class_exists('\Aichat\Uploads')) {
+			http_response_code(404);
 			$this->response->addHeader($this->request->server['SERVER_PROTOCOL'] . ' 404 Not Found');
 			$this->response->setOutput('');
 			return;
@@ -2258,6 +2412,7 @@ class ControllerExtensionModuleAichat extends Controller {
 		}
 
 		if ($file === '') {
+			http_response_code(404);
 			$this->response->addHeader($this->request->server['SERVER_PROTOCOL'] . ' 404 Not Found');
 			$this->response->setOutput('');
 			return;
@@ -2269,5 +2424,637 @@ class ControllerExtensionModuleAichat extends Controller {
 		$this->response->addHeader('X-Content-Type-Options: nosniff');
 		$this->response->addHeader('Cache-Control: private, max-age=3600');
 		$this->response->setOutput((string)file_get_contents($file));
+	}
+
+	// ------------------------------------------------------------------
+	// personal data (round 6, GDPR)
+	// ------------------------------------------------------------------
+
+	/** OpenCart permission entry for personal data (user groups); a stub controller makes it appear in the group form. */
+	const PD_ROUTE = 'extension/module/aichat_pd';
+	const ERASE_WORD = 'DELETE';
+
+	/** May the current admin user see personal data (transcripts, contact data, exports, images)? */
+	private function canPd() {
+		return $this->user->hasPermission('access', self::PD_ROUTE) && $this->user->hasPermission('access', 'extension/module/aichat');
+	}
+
+	/** Erase and restrict: personal-data access plus the module's modify right. */
+	private function canPdModify() {
+		return $this->canPd() && $this->user->hasPermission('modify', 'extension/module/aichat');
+	}
+
+	private function hasPrivacyLib($method) {
+		return class_exists('\\Aichat\\Privacy') && method_exists('\\Aichat\\Privacy', $method);
+	}
+
+	/**
+	 * Calls Aichat\Privacy::$method with arguments matched by parameter name (registry, userId,
+	 * conversationId, action, data, ...), so small differences in argument order do not matter.
+	 * Static or instance method alike. Returns null when the library or the method is missing.
+	 */
+	private function privacyCall($method, array $named) {
+		if (!$this->hasPrivacyLib($method)) {
+			return null;
+		}
+
+		$rm = new \ReflectionMethod('\\Aichat\\Privacy', $method);
+		$norm = array();
+		foreach ($named as $k => $v) {
+			$norm[strtolower(str_replace('_', '', $k))] = $v;
+		}
+		$aliases = array('cid' => 'conversationid', 'id' => 'conversationid', 'uid' => 'userid', 'user' => 'userid', 'on' => 'on', 'q' => 'query');
+		$args = array();
+		$positional = array_values($named);
+		foreach ($rm->getParameters() as $i => $param) {
+			$name = strtolower(str_replace('_', '', $param->getName()));
+			if (isset($aliases[$name]) && !array_key_exists($name, $norm)) {
+				$name = $aliases[$name];
+			}
+			if ($name === 'registry') {
+				$args[] = $this->registry;
+			} elseif (array_key_exists($name, $norm)) {
+				$args[] = $norm[$name];
+			} elseif ($param->isDefaultValueAvailable()) {
+				$args[] = $param->getDefaultValue();
+			} else {
+				$args[] = isset($positional[$i]) ? $positional[$i] : null;
+			}
+		}
+
+		if ($rm->isStatic()) {
+			return $rm->invokeArgs(null, $args);
+		}
+
+		return $rm->invokeArgs(new \Aichat\Privacy($this->registry), $args);
+	}
+
+	/** Text with e-mails, phones, IBAN, cards, ЕГН/ЛНЧ, ΑΜΚΑ/ΑΦΜ and street addresses masked. */
+	private function redact($text) {
+		$text = (string)$text;
+		if ($this->hasPrivacyLib('redactText')) {
+			return (string)$this->privacyCall('redactText', array('text' => $text));
+		}
+
+		// conservative stand-in until the library lands: e-mails and every run of 6+ digits
+		$text = preg_replace('/[^\s@<>()]+@[^\s@<>()]+\.[a-z]{2,}/iu', '[…]', $text);
+
+		return preg_replace('/\+?\d[\d\s\/().-]{4,}\d/u', '[…]', $text);
+	}
+
+	/** aichat_access_log: transcript views, exports and deletes. */
+	private function accessLog($conversationId, $action) {
+		$uid = (int)$this->user->getId();
+		if ($this->hasPrivacyLib('accessLog')) {
+			$this->privacyCall('accessLog', array('registry' => null, 'userId' => $uid, 'conversationId' => (int)$conversationId, 'action' => $action));
+			return;
+		}
+		$this->load->model('extension/module/aichat');
+		$this->model_extension_module_aichat->writeAccessLog($uid, (int)$conversationId, $action);
+	}
+
+	/** aichat_dsr: the accountability log of data-subject requests. */
+	private function dsrLog($action, array $query, array $result) {
+		$uid = (int)$this->user->getId();
+		$data = array('query' => $query, 'result' => $result);
+		if ($this->hasPrivacyLib('log')) {
+			$this->privacyCall('log', array('registry' => null, 'userId' => $uid, 'action' => $action, 'data' => $data));
+			return;
+		}
+		$this->load->model('extension/module/aichat');
+		$this->model_extension_module_aichat->writeDsr($uid, $action, $query, $result);
+	}
+
+	private function pdDenied($json = true) {
+		if ($json) {
+			return $this->json(array('success' => false, 'error' => $this->str('error_pd_permission')));
+		}
+		$this->session->data['aichat_warning'] = $this->str('error_pd_permission');
+		$this->response->redirect($this->url->link('extension/module/aichat/conversations', 'user_token=' . $this->session->data['user_token'], true));
+	}
+
+	/** Search input of the GDPR page, from GET or POST. */
+	private function dsrQuery($src) {
+		$email = isset($src['email']) ? trim(html_entity_decode((string)$src['email'], ENT_QUOTES, 'UTF-8')) : '';
+		$phone = isset($src['phone']) ? preg_replace('/[^\d+]/', '', (string)$src['phone']) : '';
+		$orderId = isset($src['order_id']) ? (int)preg_replace('/\D/', '', (string)$src['order_id']) : 0;
+		$customerId = isset($src['customer_id']) ? (int)preg_replace('/\D/', '', (string)$src['customer_id']) : 0;
+		$received = isset($src['received']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$src['received']) ? (string)$src['received'] : date('Y-m-d');
+		if ($received > date('Y-m-d')) {
+			$received = date('Y-m-d');
+		}
+		$ref = isset($src['ref']) ? trim(html_entity_decode((string)$src['ref'], ENT_QUOTES, 'UTF-8')) : '';
+		$ref = function_exists('mb_substr') ? mb_substr($ref, 0, 120) : substr($ref, 0, 120);
+
+		$q = array();
+		if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+			$q['email'] = strtolower($email);
+		}
+		if (strlen(preg_replace('/\D/', '', $phone)) >= 6) {
+			$q['phone'] = $phone;
+		}
+		if ($orderId > 0) {
+			$q['order_id'] = $orderId;
+		}
+		if ($customerId > 0) {
+			$q['customer_id'] = $customerId;
+		}
+
+		$case = isset($src['case']) && preg_match('/^[a-f0-9]{12}$/', (string)$src['case']) ? (string)$src['case'] : substr(md5(json_encode($q) . '|' . $received . '|' . $ref), 0, 12);
+
+		return array('q' => $q, 'received' => $received, 'ref' => $ref, 'case' => $case, 'email_raw' => $email);
+	}
+
+	private function countLabel($key) {
+		$label = $this->str('text_cnt_' . $key);
+
+		return $label === 'text_cnt_' . $key ? (string)$key : $label;
+	}
+
+	private function dueInfo($received, $closed) {
+		$due = date('Y-m-d', strtotime($received . ' +1 month'));
+		$days = (int)floor((strtotime($due) - strtotime(date('Y-m-d'))) / 86400);
+		if ($closed) {
+			return array('due' => $due, 'text' => $this->str('text_dsr_closed'), 'class' => 'success');
+		}
+		if ($days < 0) {
+			return array('due' => $due, 'text' => sprintf($this->str('text_dsr_overdue'), -$days), 'class' => 'danger');
+		}
+
+		return array('due' => $due, 'text' => sprintf($this->str('text_dsr_due_in'), $days), 'class' => $days <= 7 ? 'warning' : 'default');
+	}
+
+	/** GDPR page: search, results, export/erase/restrict, DSR log and access log. */
+	public function privacy() {
+		$this->boot();
+		if (!$this->canPd()) {
+			$this->session->data['aichat_warning'] = $this->str('error_pd_permission');
+			$this->response->redirect($this->url->link('extension/module/aichat/dashboard', 'user_token=' . $this->session->data['user_token'], true));
+			return;
+		}
+
+		$data = $this->pageData('privacy');
+		$this->document->setTitle($this->str('text_gdpr_title'));
+		$this->document->addStyle('view/stylesheet/aichat.css');
+		$this->document->addScript('view/javascript/aichat/privacy.js');
+		$this->load->model('extension/module/aichat');
+		$m = $this->model_extension_module_aichat;
+		$token = $this->session->data['user_token'];
+
+		$names = array();
+		foreach ($this->storeList() as $st) {
+			$names[$st['store_id']] = $st['name'];
+		}
+
+		$data['lib_ready'] = $this->hasPrivacyLib('find');
+		$data['can_erase'] = $this->canPdModify();
+		$data['erase_word'] = self::ERASE_WORD;
+		$get = $this->request->get;
+		$searched = !empty($get['search']);
+		$dq = $this->dsrQuery($get);
+		$data['form'] = array(
+			'email'       => isset($get['email']) ? html_entity_decode((string)$get['email'], ENT_QUOTES, 'UTF-8') : '',
+			'phone'       => isset($get['phone']) ? (string)$get['phone'] : '',
+			'order_id'    => isset($get['order_id']) && (int)$get['order_id'] ? (int)$get['order_id'] : '',
+			'customer_id' => isset($get['customer_id']) && (int)$get['customer_id'] ? (int)$get['customer_id'] : '',
+			'received'    => $dq['received'],
+			'ref'         => $dq['ref'],
+			'case'        => $dq['case']
+		);
+		$data['searched'] = $searched;
+		$data['search_error'] = '';
+		$data['results'] = array('conversations' => array(), 'requests' => array(), 'uploads' => 0);
+
+		if ($searched) {
+			if (!$dq['q']) {
+				$data['search_error'] = $this->str('error_dsr_query');
+			} elseif (!$data['lib_ready']) {
+				$data['search_error'] = $this->str('error_privacy_lib');
+			} else {
+				$found = $this->privacyCall('find', array('registry' => null, 'q' => $dq['q']));
+				$found = is_array($found) ? $found : array();
+				$convs = isset($found['conversations']) && is_array($found['conversations']) ? $found['conversations'] : array();
+				$reqs = isset($found['requests']) && is_array($found['requests']) ? $found['requests'] : array();
+				foreach ($convs as $c) {
+					$cid = isset($c['conversation_id']) ? (int)$c['conversation_id'] : 0;
+					if (!$cid) {
+						continue;
+					}
+					$data['results']['conversations'][] = array(
+						'id'         => $cid,
+						'store'      => isset($c['store_id'], $names[(int)$c['store_id']]) ? $names[(int)$c['store_id']] : (isset($c['store_id']) ? (string)$c['store_id'] : ''),
+						'date'       => isset($c['date_added']) ? (string)$c['date_added'] : '',
+						'modified'   => isset($c['date_modified']) ? (string)$c['date_modified'] : '',
+						'messages'   => isset($c['message_count']) ? (int)$c['message_count'] : 0,
+						'restricted' => !empty($c['restricted']),
+						'href'       => $this->url->link('extension/module/aichat/conversation', 'user_token=' . $token . '&conversation_id=' . $cid, true)
+					);
+				}
+				foreach ($reqs as $r) {
+					$rid = isset($r['request_id']) ? (int)$r['request_id'] : 0;
+					if (!$rid) {
+						continue;
+					}
+					$type = isset($r['type']) ? (string)$r['type'] : '';
+					$label = $this->str('text_rq_' . $type);
+					$data['results']['requests'][] = array(
+						'id'    => $rid,
+						'type'  => $label === 'text_rq_' . $type ? $type : $label,
+						'store' => isset($r['store_id'], $names[(int)$r['store_id']]) ? $names[(int)$r['store_id']] : '',
+						'date'  => isset($r['date_added']) ? (string)$r['date_added'] : ''
+					);
+				}
+				$data['results']['uploads'] = isset($found['uploads']) ? (int)$found['uploads'] : 0;
+
+				$this->dsrLog('search', array_merge($dq['q'], array('received' => $dq['received'], 'ref' => $dq['ref'], 'case' => $dq['case'])), array(
+					'conversations' => count($data['results']['conversations']),
+					'requests'      => count($data['results']['requests']),
+					'uploads'       => $data['results']['uploads']
+				));
+			}
+		}
+
+		// DSR log: one "case" per search; closed by an export or an erasure with the same case id
+		$data['dsr'] = array();
+		$closed = array();
+		$rows = $m->getDsrLog(200);
+		foreach ($rows as $row) {
+			if (in_array($row['action'], array('export', 'erase'), true) && $row['case'] !== '') {
+				$closed[$row['case']] = true;
+			}
+		}
+		$users = $m->getUserNames(array_column($rows, 'user_id'));
+		foreach (array_slice($rows, 0, 100) as $row) {
+			$q = $row['query'];
+			$parts = array();
+			foreach (array('email' => 'text_email', 'phone' => 'text_phone', 'order_id' => 'text_order', 'customer_id' => 'text_customer') as $k => $label) {
+				if (!empty($q[$k])) {
+					$parts[] = $this->str($label) . ': ' . (is_scalar($q[$k]) ? (string)$q[$k] : '');
+				}
+			}
+			if (!empty($q['conversation_ids']) && is_array($q['conversation_ids'])) {
+				$parts[] = $this->str('text_conversations') . ': ' . implode(', ', array_map('intval', $q['conversation_ids']));
+			} elseif (!empty($q['conversation_id'])) {
+				$parts[] = $this->str('text_conversation') . ' #' . (int)$q['conversation_id'];
+			}
+			if (!empty($q['request_ids']) && is_array($q['request_ids'])) {
+				$parts[] = $this->str('text_requests') . ': ' . implode(', ', array_map('intval', $q['request_ids']));
+			}
+			$res = array();
+			foreach ($row['result'] as $k => $v) {
+				if (is_scalar($v) && $k !== 'file') {
+					$res[] = $this->countLabel($k) . ': ' . (is_bool($v) ? ($v ? '1' : '0') : (string)$v);
+				}
+			}
+			$received = isset($q['received']) && is_string($q['received']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $q['received']) ? $q['received'] : '';
+			$due = ($row['action'] === 'search' && $received !== '') ? $this->dueInfo($received, isset($closed[$row['case']])) : null;
+			$label = $this->str('text_dsr_action_' . $row['action']);
+			$data['dsr'][] = array(
+				'date'     => $row['date_added'],
+				'user'     => isset($users[(int)$row['user_id']]) ? $users[(int)$row['user_id']] : ('#' . (int)$row['user_id']),
+				'action'   => $label === 'text_dsr_action_' . $row['action'] ? $row['action'] : $label,
+				'raw'      => $row['action'],
+				'query'    => implode(' · ', $parts),
+				'ref'      => isset($q['ref']) && is_string($q['ref']) ? $q['ref'] : '',
+				'received' => $received,
+				'due'      => $due,
+				'result'   => implode(', ', $res)
+			);
+		}
+
+		$data['access'] = array();
+		$arows = $m->getAccessLog(100);
+		$ausers = $m->getUserNames(array_column($arows, 'user_id'));
+		foreach ($arows as $row) {
+			$label = $this->str('text_access_' . $row['action']);
+			$cid = (int)$row['conversation_id'];
+			$data['access'][] = array(
+				'date'   => $row['date_added'],
+				'user'   => isset($ausers[(int)$row['user_id']]) ? $ausers[(int)$row['user_id']] : ('#' . (int)$row['user_id']),
+				'action' => $label === 'text_access_' . $row['action'] ? $row['action'] : $label,
+				'id'     => $cid,
+				'href'   => ($cid && $m->conversationExists($cid)) ? $this->url->link('extension/module/aichat/conversation', 'user_token=' . $token . '&conversation_id=' . $cid, true) : ''
+			);
+		}
+		$data['dsr_ready'] = $m->hasTable('dsr');
+		$data['access_ready'] = $m->hasTable('access_log');
+
+		$data['action'] = $this->url->link('extension/module/aichat/privacy', 'user_token=' . $token, true);
+		$data['urls'] = array(
+			'export'   => $this->link('extension/module/aichat/privacy_export'),
+			'erase'    => $this->link('extension/module/aichat/privacy_erase'),
+			'restrict' => $this->link('extension/module/aichat/privacy_restrict')
+		);
+		$data['js_i18n'] = array(
+			'select'        => $this->str('error_dsr_select'),
+			'erase_confirm' => sprintf($this->str('text_erase_prompt'), self::ERASE_WORD),
+			'erase_word'    => $this->str('error_erase_word'),
+			'working'       => $this->str('text_working'),
+			'exported'      => $this->str('text_exported'),
+			'error'         => $this->str('error_generic')
+		);
+		$data['compliance_url'] = $this->url->link('extension/module/aichat/compliance', 'user_token=' . $token, true);
+
+		$data['header'] = $this->load->controller('common/header');
+		$data['column_left'] = $this->load->controller('common/column_left');
+		$data['footer'] = $this->load->controller('common/footer');
+
+		$this->response->setOutput($this->load->view('extension/module/aichat_privacy', $data));
+	}
+
+	/** Ids posted by the GDPR page (only positive integers). */
+	private function postedIds($key) {
+		$out = array();
+		$raw = isset($this->request->post[$key]) ? $this->request->post[$key] : array();
+		foreach (is_array($raw) ? $raw : explode(',', (string)$raw) as $id) {
+			$id = (int)$id;
+			if ($id > 0 && !in_array($id, $out, true)) {
+				$out[] = $id;
+			}
+		}
+
+		return array_slice($out, 0, 500);
+	}
+
+	/** POST conversation_ids[], request_ids[], case info → {success, url} of a one-time ZIP download. */
+	public function privacy_export() {
+		if ($this->request->server['REQUEST_METHOD'] != 'POST' || !$this->canPd()) {
+			return $this->pdDenied();
+		}
+		if (!$this->hasPrivacyLib('export') || !$this->hasPrivacyLib('exportUrlToken')) {
+			return $this->json(array('success' => false, 'error' => $this->str('error_privacy_lib')));
+		}
+
+		$cids = $this->postedIds('conversation_ids');
+		$rids = $this->postedIds('request_ids');
+		if (!$cids && !$rids) {
+			return $this->json(array('success' => false, 'error' => $this->str('error_dsr_select')));
+		}
+
+		$dq = $this->dsrQuery($this->post());
+		$path = $this->privacyCall('export', array('registry' => null, 'conversationIds' => $cids, 'requestIds' => $rids));
+		if (!is_string($path) || $path === '') {
+			return $this->json(array('success' => false, 'error' => $this->str('error_generic')));
+		}
+		$t = (string)$this->privacyCall('exportUrlToken', array('path' => $path));
+
+		foreach ($cids as $cid) {
+			$this->accessLog($cid, 'export');
+		}
+		$this->dsrLog('export', array_merge($dq['q'], array('conversation_ids' => $cids, 'request_ids' => $rids, 'received' => $dq['received'], 'ref' => $dq['ref'], 'case' => $dq['case'])), array(
+			'conversations' => count($cids), 'requests' => count($rids), 'file' => basename($path)
+		));
+
+		$this->json(array('success' => true, 'url' => $this->link('extension/module/aichat/privacy_download', '&t=' . rawurlencode($t))));
+	}
+
+	/** GET t=<token from exportUrlToken>: streams the export ZIP. */
+	public function privacy_download() {
+		if (!$this->canPd() || !$this->hasPrivacyLib('readExport')) {
+			$this->response->redirect($this->url->link('error/permission', 'user_token=' . $this->session->data['user_token'], true));
+			return;
+		}
+
+		$t = isset($this->request->get['t']) ? (string)$this->request->get['t'] : '';
+		$res = $t !== '' ? $this->privacyCall('readExport', array('token' => $t)) : null;
+		$file = '';
+		$content = null;
+		if (is_array($res)) {
+			$file = isset($res['path']) ? (string)$res['path'] : (isset($res['file']) ? (string)$res['file'] : '');
+			$content = isset($res['content']) ? (string)$res['content'] : null;
+		} elseif (is_string($res) && $res !== '') {
+			if (strlen($res) < 4096 && strpos($res, "\0") === false && is_file($res)) {
+				$file = $res;
+			} else {
+				$content = $res;
+			}
+		}
+		if ($content === null && ($file === '' || !is_file($file))) {
+			http_response_code(404);
+			$this->response->addHeader($this->request->server['SERVER_PROTOCOL'] . ' 404 Not Found');
+			$this->response->setOutput($this->str('error_export_gone'));
+			return;
+		}
+
+		$this->response->setCompression(0);
+		$this->response->addHeader('Content-Type: application/zip');
+		$this->response->addHeader('Content-Disposition: attachment; filename="aichat-personal-data-' . date('Ymd-His') . '.zip"');
+		$this->response->addHeader('Cache-Control: no-store');
+		$this->response->addHeader('X-Content-Type-Options: nosniff');
+		$this->response->setOutput($content !== null ? $content : (string)file_get_contents($file));
+	}
+
+	/** POST conversation_ids[], request_ids[], confirm=DELETE, case info. */
+	public function privacy_erase() {
+		if ($this->request->server['REQUEST_METHOD'] != 'POST' || !$this->canPdModify()) {
+			return $this->pdDenied();
+		}
+		if (!$this->hasPrivacyLib('erase')) {
+			return $this->json(array('success' => false, 'error' => $this->str('error_privacy_lib')));
+		}
+		if (trim(isset($this->request->post['confirm']) ? (string)$this->request->post['confirm'] : '') !== self::ERASE_WORD) {
+			return $this->json(array('success' => false, 'error' => $this->str('error_erase_word')));
+		}
+
+		$cids = $this->postedIds('conversation_ids');
+		$rids = $this->postedIds('request_ids');
+		if (!$cids && !$rids) {
+			return $this->json(array('success' => false, 'error' => $this->str('error_dsr_select')));
+		}
+
+		$dq = $this->dsrQuery($this->post());
+		foreach ($cids as $cid) {
+			$this->accessLog($cid, 'delete');
+		}
+		$counts = $this->privacyCall('erase', array('registry' => null, 'conversationIds' => $cids, 'requestIds' => $rids));
+		$counts = is_array($counts) ? $counts : array();
+		$this->dsrLog('erase', array_merge($dq['q'], array('conversation_ids' => $cids, 'request_ids' => $rids, 'received' => $dq['received'], 'ref' => $dq['ref'], 'case' => $dq['case'])), $counts);
+
+		$parts = array();
+		foreach ($counts as $k => $v) {
+			if (is_scalar($v) && (int)$v !== 0) {
+				$parts[] = $this->countLabel($k) . ': ' . $v;
+			}
+		}
+		$this->json(array('success' => true, 'message' => $this->str('text_erased') . ($parts ? ' (' . implode(', ', $parts) . ')' : '')));
+	}
+
+	/** POST conversation_id, on=1|0. */
+	public function privacy_restrict() {
+		if ($this->request->server['REQUEST_METHOD'] != 'POST' || !$this->canPdModify()) {
+			return $this->pdDenied();
+		}
+		if (!$this->hasPrivacyLib('restrict')) {
+			return $this->json(array('success' => false, 'error' => $this->str('error_privacy_lib')));
+		}
+
+		$cid = isset($this->request->post['conversation_id']) ? (int)$this->request->post['conversation_id'] : 0;
+		$on = !empty($this->request->post['on']);
+		$this->load->model('extension/module/aichat');
+		if (!$cid || !$this->model_extension_module_aichat->conversationExists($cid)) {
+			return $this->json(array('success' => false, 'error' => $this->str('error_not_found')));
+		}
+
+		$this->privacyCall('restrict', array('registry' => null, 'conversationId' => $cid, 'on' => $on));
+		$dq = $this->dsrQuery($this->post());
+		$this->dsrLog($on ? 'restrict' : 'unrestrict', array_merge($dq['q'], array('conversation_id' => $cid, 'received' => $dq['received'], 'ref' => $dq['ref'], 'case' => $dq['case'])), array('restricted' => $on ? 1 : 0));
+
+		$this->json(array('success' => true, 'restricted' => $on ? 1 : 0, 'message' => $this->str($on ? 'text_restricted_on' : 'text_restricted_off')));
+	}
+
+	// ------------------------------------------------------------------
+	// compliance page (round 6): generated from the current settings
+	// ------------------------------------------------------------------
+
+	public function compliance() {
+		$this->boot();
+		$data = $this->pageData('compliance');
+		$this->document->setTitle($this->str('text_compliance_title'));
+		$this->document->addStyle('view/stylesheet/aichat.css');
+		$this->document->addScript('view/javascript/aichat/privacy.js');
+
+		$settings = $this->settings();
+		$g = $settings->getGlobal();
+		$gv = function ($k, $def) use ($g) {
+			return isset($g[$k]) && $g[$k] !== '' && $g[$k] !== null ? $g[$k] : $def;
+		};
+
+		$stores = array();
+		$anyTg = false;
+		$anyTgFull = false;
+		$anyImages = false;
+		$anyMinOff = false;
+		$anyAccept = false;
+		$anyGate = false;
+		$tgGlobal = trim((string)$gv('g_tg_chat_id', '')) !== '' && (method_exists($settings, 'hasSecret') ? (bool)$settings->hasSecret('tg_token') : false);
+		foreach ($this->storeList() as $st) {
+			$s = $settings->getStore($st['store_id']);
+			$s = is_array($s) ? $s : array();
+			$on = !empty($s['s_status']);
+			$tg = $tgGlobal || (isset($s['s_tg_chat_id']) && trim((string)$s['s_tg_chat_id']) !== '' && method_exists($settings, 'hasSecret') && $settings->hasSecret('tg_token'));
+			$mask = !empty($s['s_tg_mask']);
+			$min = !isset($s['s_min_model']) || (string)$s['s_min_model'] === '' ? 1 : (int)$s['s_min_model'];
+			$images = !isset($s['s_feat_images']) || (string)$s['s_feat_images'] === '' ? 1 : (int)$s['s_feat_images'];
+			$tgDays = isset($s['s_tg_delete_days']) && $s['s_tg_delete_days'] !== '' ? (int)$s['s_tg_delete_days'] : 7;
+			if ($on) {
+				$anyTg = $anyTg || $tg;
+				$anyTgFull = $anyTgFull || ($tg && !$mask);
+				$anyImages = $anyImages || $images;
+				$anyMinOff = $anyMinOff || !$min;
+				$anyAccept = $anyAccept || !empty($s['s_privacy_accept']);
+				$anyGate = $anyGate || !empty($s['s_wait_consent']);
+			}
+			$stores[] = array(
+				'name'    => $st['name'],
+				'on'      => $on,
+				'tg'      => $tg,
+				'mask'    => $mask,
+				'tg_days' => $tgDays,
+				'min'     => (bool)$min,
+				'images'  => (bool)$images,
+				'accept'  => !empty($s['s_privacy_accept']),
+				'gate'    => !empty($s['s_wait_consent'])
+			);
+		}
+
+		$ret = array(
+			'conv'    => (int)$gv('g_retention_months', 6),
+			'ip'      => (int)$gv('g_ip_days', 30),
+			'img'     => (int)$gv('g_image_retention_days', 30),
+			'req'     => (int)$gv('g_request_months', 12),
+			'miss'    => (int)$gv('g_miss_days', 90)
+		);
+		$forever = $this->str('text_forever');
+		$months = function ($n) use ($forever) {
+			return $n > 0 ? sprintf($this->str('text_n_months'), $n) : $forever;
+		};
+		$daysF = function ($n) use ($forever) {
+			return $n > 0 ? sprintf($this->str('text_n_days'), $n) : $forever;
+		};
+		$data['retention'] = array(
+			array($this->str('rt_conversations'), $months($ret['conv']), $this->str('rt_conversations_note'), $ret['conv'] > 12 || $ret['conv'] === 0),
+			array($this->str('rt_ip'), $daysF($ret['ip']), $this->str('rt_ip_note'), $ret['ip'] > 365 || $ret['ip'] === 0),
+			array($this->str('rt_images'), $daysF($ret['img']), $this->str('rt_images_note'), $ret['img'] > 365 || $ret['img'] === 0),
+			array($this->str('rt_requests'), $months($ret['req']), $this->str('rt_requests_note'), $ret['req'] > 12 || $ret['req'] === 0),
+			array($this->str('rt_misses'), $daysF($ret['miss']), $this->str('rt_misses_note'), $ret['miss'] > 365 || $ret['miss'] === 0),
+			array($this->str('rt_tg'), $this->str('rt_tg_value'), $this->str('rt_tg_note'), false),
+			array($this->str('rt_exports'), sprintf($this->str('text_n_hours'), 24), $this->str('rt_exports_note'), false),
+			array($this->str('rt_dsr'), sprintf($this->str('text_n_months'), 36), $this->str('rt_dsr_note'), false),
+			array($this->str('rt_access'), sprintf($this->str('text_n_months'), 12), $this->str('rt_access_note'), false),
+			array($this->str('rt_rate'), $this->str('rt_rate_value'), $this->str('rt_rate_note'), false),
+			array($this->str('rt_browser'), $this->str('rt_browser_value'), $this->str('rt_browser_note'), false)
+		);
+
+		$mailEngine = (string)$this->config->get('config_mail_engine');
+		$smtpHost = (string)$this->config->get('config_mail_smtp_hostname');
+		$mailWho = $mailEngine === 'smtp' && $smtpHost !== '' ? sprintf($this->str('pr_mail_smtp'), preg_replace('#^[a-z]+://#i', '', $smtpHost)) : $this->str('pr_mail_php');
+		$turnstile = trim((string)$gv('g_turnstile_site', '')) !== '';
+		$model = (string)$gv('g_model', 'claude-sonnet-5-5');
+
+		$data['processors'] = array(
+			array('name' => 'Anthropic (Claude API)', 'active' => true, 'role' => $this->str('pr_anthropic_role'),
+				'gets' => $this->str('pr_anthropic_gets') . ' ' . ($anyMinOff ? $this->str('pr_anthropic_min_off') : $this->str('pr_anthropic_min_on')) . ($anyImages ? ' ' . $this->str('pr_anthropic_images') : ''),
+				'where' => $this->str('pr_anthropic_where'), 'note' => sprintf($this->str('pr_anthropic_note'), $model)),
+			array('name' => 'Telegram', 'active' => $anyTg, 'role' => $this->str('pr_tg_role'),
+				'gets' => $anyTg ? ($anyTgFull ? $this->str('pr_tg_gets_full') : $this->str('pr_tg_gets_masked')) : $this->str('pr_not_used'),
+				'where' => $this->str('pr_tg_where'), 'note' => $this->str('pr_tg_note')),
+			array('name' => 'Cloudflare Turnstile', 'active' => $turnstile, 'role' => $this->str('pr_ts_role'),
+				'gets' => $turnstile ? $this->str('pr_ts_gets') : $this->str('pr_not_used'),
+				'where' => $this->str('pr_ts_where'), 'note' => $this->str('pr_ts_note')),
+			array('name' => $this->str('pr_hosting'), 'active' => true, 'role' => $this->str('pr_hosting_role'),
+				'gets' => $this->str('pr_hosting_gets'), 'where' => $this->str('pr_hosting_where'), 'note' => $this->str('pr_hosting_note')),
+			array('name' => $this->str('pr_mail'), 'active' => true, 'role' => $this->str('pr_mail_role'),
+				'gets' => $this->str('pr_mail_gets'), 'where' => $mailWho, 'note' => $this->str('pr_mail_note'))
+		);
+		$data['stores_pd'] = $stores;
+
+		// record of processing (Art. 30), plain text to copy into the owner's register
+		$lines = array();
+		$lines[] = $this->str('ropa_title');
+		$lines[] = '';
+		$lines[] = $this->str('ropa_controller');
+		$lines[] = sprintf($this->str('ropa_stores'), implode(', ', array_map(function ($s) {
+			return $s['name'];
+		}, array_filter($stores, function ($s) {
+			return $s['on'];
+		}))) ?: '-');
+		$lines[] = $this->str('ropa_purpose');
+		$lines[] = $this->str('ropa_basis');
+		$lines[] = $this->str('ropa_subjects');
+		$lines[] = $this->str('ropa_categories') . ($anyImages ? ' ' . $this->str('ropa_categories_images') : '');
+		$lines[] = $this->str('ropa_special');
+		$recipients = array('Anthropic PBC');
+		if ($anyTg) {
+			$recipients[] = 'Telegram (' . $this->str('ropa_tg_staff') . ')';
+		}
+		if ($turnstile) {
+			$recipients[] = 'Cloudflare, Inc.';
+		}
+		$recipients[] = $this->str('pr_hosting');
+		$recipients[] = $this->str('pr_mail') . ' (' . $mailWho . ')';
+		$lines[] = sprintf($this->str('ropa_recipients'), implode('; ', $recipients));
+		$lines[] = $this->str('ropa_transfers') . ($anyTg ? ' ' . $this->str('ropa_transfers_tg') : '') . ($turnstile ? ' ' . $this->str('ropa_transfers_ts') : '');
+		$lines[] = sprintf($this->str('ropa_retention'), $months($ret['conv']), $daysF($ret['ip']), $daysF($ret['img']), $months($ret['req']), $daysF($ret['miss']));
+		$lines[] = $this->str('ropa_security');
+		$lines[] = $this->str('ropa_automated');
+		$data['ropa'] = implode("\n", $lines);
+
+		$data['checklist'] = array();
+		foreach (array('controller', 'policy', 'dpa', 'telegram', 'basis', 'dsr', 'breach', 'backups', 'mailbox', 'children', 'dpia', 'cookies', 'access', 'staff') as $k) {
+			if ($k === 'telegram' && !$anyTg) {
+				continue;
+			}
+			$data['checklist'][] = array('title' => $this->str('ck_' . $k), 'text' => $this->str('ck_' . $k . '_text'));
+		}
+		$data['flags'] = array('tg_full' => $anyTgFull, 'min_off' => $anyMinOff, 'accept' => $anyAccept, 'gate' => $anyGate);
+		$data['settings_url'] = $this->url->link('extension/module/aichat', 'user_token=' . $this->session->data['user_token'] . '&tab=privacy', true);
+		$data['gdpr_url'] = $this->canPd() ? $this->url->link('extension/module/aichat/privacy', 'user_token=' . $this->session->data['user_token'], true) : '';
+		$data['generated'] = date('Y-m-d H:i');
+
+		$data['header'] = $this->load->controller('common/header');
+		$data['column_left'] = $this->load->controller('common/column_left');
+		$data['footer'] = $this->load->controller('common/footer');
+
+		$this->response->setOutput($this->load->view('extension/module/aichat_compliance', $data));
 	}
 }

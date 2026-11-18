@@ -17,6 +17,8 @@ class ControllerExtensionModuleAichat extends Controller {
 
 	private $settingsObj = null;
 	private $streaming = false;
+	/** send: {code: masked, message, found, text} when scrubSensitive() masked something */
+	private $notice = null;
 
 	// ================================================================ boot
 
@@ -59,8 +61,8 @@ class ControllerExtensionModuleAichat extends Controller {
 			$publicId = false;
 		}
 
-		// Resume window: older conversations start fresh
-		if ($conversation && !$this->resumable($conversation, $store)) {
+		// Resume window: older conversations start fresh; a restricted one (GDPR) is never continued
+		if ($conversation && (!$this->resumable($conversation, $store) || !empty($conversation['restricted']))) {
 			$conversation = null;
 			$publicId = false;
 		}
@@ -160,6 +162,7 @@ class ControllerExtensionModuleAichat extends Controller {
 				'cart'   => (int)$store['s_feat_cart'] === 1,
 			),
 			'sound'          => (int)$store['s_sound'] === 1,
+			'privacy'        => $this->privacyNotice($settings, $store, $storeId, $languageId, $conversation),
 			'proactive'      => array(
 				// decided here: only on product / category / search / brand pages, only for new visitors
 				'enabled' => (int)$store['s_proactive'] === 1 && in_array($pageType, array('product', 'category', 'search', 'manufacturer'), true),
@@ -169,6 +172,35 @@ class ControllerExtensionModuleAichat extends Controller {
 		));
 
 		$this->maintenance($settings);
+	}
+
+	/**
+	 * boot.privacy {text, url, require_accept}: the notice above the input.
+	 * require_accept is true while s_privacy_accept is on and this
+	 * conversation has not accepted yet (send then needs privacy_accepted: 1).
+	 */
+	private function privacyNotice(\Aichat\Settings $settings, array $store, $storeId, $languageId, $conversation) {
+		$text = $this->byLanguage($store['s_privacy_text'], $languageId);
+
+		if ($text === '') {
+			$months = (int)$settings->getGlobal('g_retention_months');
+			$text = $months > 0 ? sprintf($this->language->get('privacy_default'), $months) : $this->language->get('privacy_default_nolimit');
+		}
+
+		$url = \Aichat\Privacy::cleanUrl(is_array($store['s_privacy_url']) && isset($store['s_privacy_url'][$languageId]) ? $store['s_privacy_url'][$languageId] : '');
+
+		if ($url === '') {
+			$informationId = \Aichat\Privacy::privacyInformationId($this->registry, $storeId, $languageId);
+			if ($informationId) {
+				$url = str_replace('&amp;', '&', (string)$this->url->link('information/information', 'information_id=' . $informationId));
+			}
+		}
+
+		return array(
+			'text'           => $text,
+			'url'            => $url,
+			'require_accept' => (int)$store['s_privacy_accept'] === 1 && !($conversation && !empty($conversation['privacy_accepted_at'])),
+		);
 	}
 
 	/** Lazy housekeeping after the response (weekly report, retention), see \Aichat\Maintenance. */
@@ -486,8 +518,24 @@ class ControllerExtensionModuleAichat extends Controller {
 			return;
 		}
 
+		// restricted (GDPR): processing stopped, the conversation cannot be continued (boot starts a fresh one)
+		if ($conversation && !empty($conversation['restricted'])) {
+			$this->fail('invalid_token');
+			return;
+		}
+
 		// --- message (+ images)
 		$message = isset($input['message']) && is_string($input['message']) ? $this->cleanText($input['message']) : '';
+		// GDPR: card numbers, IBAN, ЕГН/ЛНЧ, ΑΜΚΑ, passwords are masked before anything is stored or sent
+		// (phone numbers, e-mails and order numbers stay: order verification needs them)
+		$scrub = \Aichat\Privacy::scrubSensitive($message);
+		$message = $scrub['text'];
+		$this->notice = $scrub['found'] ? array(
+			'code'    => 'masked',
+			'message' => $this->language->get($scrub['found'] === array('password') ? 'text_masked_password' : 'text_masked'),
+			'found'   => $scrub['found'],
+			'text'    => $message,
+		) : null;
 		$url = isset($input['url']) && is_string($input['url']) ? substr($input['url'], 0, 2000) : '';
 		$imageIds = isset($input['images']) && is_array($input['images']) ? array_slice(array_values(array_filter(array_map('intval', array_filter($input['images'], 'is_numeric')))), 0, 10) : array();
 
@@ -517,6 +565,17 @@ class ControllerExtensionModuleAichat extends Controller {
 		if (\Aichat\Tools::len($message) > (int)$store['s_max_len']) {
 			$this->fail('too_long', (int)$store['s_max_len']);
 			return;
+		}
+
+		// privacy notice with "Accept" (s_privacy_accept): the first message carries privacy_accepted: 1
+		$acceptPrivacy = false;
+
+		if (!$isTest && (int)$store['s_privacy_accept'] === 1 && !($conversation && !empty($conversation['privacy_accepted_at']))) {
+			if (!isset($input['privacy_accepted']) || (int)$input['privacy_accepted'] !== 1) {
+				$this->fail('privacy_required');
+				return;
+			}
+			$acceptPrivacy = true;
 		}
 
 		$ip = $guard->clientIp($this->request->server);
@@ -595,6 +654,9 @@ class ControllerExtensionModuleAichat extends Controller {
 
 		if ($this->streaming) {
 			$this->sseStart();
+			if ($this->notice) {
+				$this->sse('notice', $this->notice);
+			}
 		}
 
 		// --- persist
@@ -609,6 +671,10 @@ class ControllerExtensionModuleAichat extends Controller {
 
 		if ($newVerified) {
 			$model->setHumanVerified($conversationId, $newVerified);
+		}
+
+		if ($acceptPrivacy) {
+			$model->setPrivacyAccepted($conversationId);
 		}
 
 		$conversation = $model->getConversation($publicId, $storeId);
@@ -968,6 +1034,11 @@ class ControllerExtensionModuleAichat extends Controller {
 
 		if (!(int)$ctx['store']['s_feat_images']) {
 			$this->fail('feature_off');
+			return;
+		}
+
+		if ($ctx['conversation'] && !empty($ctx['conversation']['restricted'])) {
+			$this->fail('invalid_token');
 			return;
 		}
 
@@ -1354,11 +1425,14 @@ class ControllerExtensionModuleAichat extends Controller {
 		$conversation = $ctx['conversation'];
 
 		if ($conversation) {
-			if ((string)$conversation['tg_chat_id'] !== '' && (int)$conversation['tg_topic_id'] && in_array($conversation['mode'], array('waiting', 'human'), true)) {
-				$telegram = new \Aichat\Telegram($ctx['settings']);
-				$telegram->sendMessage((string)$conversation['tg_chat_id'], (int)$conversation['tg_topic_id'], '🗑 The visitor deleted this conversation (GDPR). The chat is closed.');
+			// GDPR: the Telegram topic goes with the conversation; if Telegram refuses, staff of an open handover are told
+			if ((string)$conversation['tg_chat_id'] !== '' && (int)$conversation['tg_topic_id']) {
+				if (!\Aichat\Privacy::deleteTopic($this->registry, $ctx['settings'], $conversation) && in_array($conversation['mode'], array('waiting', 'human'), true)) {
+					$telegram = new \Aichat\Telegram($ctx['settings']);
+					$telegram->sendMessage((string)$conversation['tg_chat_id'], (int)$conversation['tg_topic_id'], '🗑 The visitor deleted this conversation (GDPR). The chat is closed; please delete this topic.');
+				}
 			}
-			\Aichat\Maintenance::deleteConversation($this->registry, (int)$conversation['conversation_id']);
+			\Aichat\Maintenance::deleteConversation($this->registry, (int)$conversation['conversation_id'], false);
 		}
 
 		$this->json(array('ok' => true, 'message' => $this->language->get('text_forgotten')));
@@ -1498,8 +1572,10 @@ class ControllerExtensionModuleAichat extends Controller {
 		}
 
 		$endpoint = $base . 'index.php?route=extension/module/aichat/';
-		$config = json_encode(array('base' => $endpoint), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP);
-		$widgetConfig = json_encode(array('endpoint' => $endpoint), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP);
+		// s_wait_consent: the widget shows the launcher only after window.AICHAT_CONSENT === true or the event aichat:consent
+		$waitConsent = (int)$settings->getStore($storeId, 's_wait_consent') === 1;
+		$config = json_encode(array('base' => $endpoint, 'wait_consent' => $waitConsent), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP);
+		$widgetConfig = json_encode(array('endpoint' => $endpoint, 'wait_consent' => $waitConsent), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP);
 
 		$tags = "\n" . '<link rel="stylesheet" href="' . htmlspecialchars($base . $asset . 'widget.css' . $version, ENT_QUOTES, 'UTF-8') . '" data-aichat="1">'
 			. "\n" . '<script>window.AICHAT=' . $config . ';window.AICHAT_CONFIG=' . $widgetConfig . ';</script>'
@@ -1775,6 +1851,10 @@ class ControllerExtensionModuleAichat extends Controller {
 	}
 
 	private function finish(array $data) {
+		if ($this->notice && !$this->streaming) {
+			$data['notice'] = $this->notice;
+		}
+
 		if ($this->streaming) {
 			$done = array('message_id' => $data['message_id'], 'mode' => $data['mode']);
 			foreach (array('wait_until', 'wait_seconds', 'wait_text') as $k) {
