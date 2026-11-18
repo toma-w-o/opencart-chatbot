@@ -341,3 +341,4 @@ html.aichat-lock, html.aichat-lock body { overflow: hidden !important; }
 .aichat-root.aichat-locked .aichat-input { opacity: .55; cursor: not-allowed; }
 .aichat-root.aichat-locked .aichat-iconbtn { opacity: .5; pointer-events: none; }
 .aichat-root .aichat-sys--warn { background: #fff4e5; color: #8a4b00; border: 1px solid #f5d3a3; font-size: 12.5px; }
+.aichat-root .aichat-ocard-addr { white-space: pre-line; margin-top: 2px; }

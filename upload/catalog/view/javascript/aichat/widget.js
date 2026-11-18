@@ -1042,6 +1042,7 @@
     info.appendChild(txt('span', 'aichat-lcard-title', c.title || (t('order') + (c.number ? ' #' + c.number : ''))));
     var sub = c.subtitle || [c.status, c.total].filter(Boolean).join(' · ');
     if (sub) { info.appendChild(txt('span', 'aichat-lcard-sub', sub)); }
+    if (c.address) { info.appendChild(txt('span', 'aichat-lcard-sub aichat-ocard-addr', String(c.address))); }
     top.appendChild(info);
     if (c.total && c.subtitle) { top.appendChild(txt('span', 'aichat-ocard-total', c.total)); }
     d.appendChild(top);
